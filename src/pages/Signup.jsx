@@ -1,103 +1,111 @@
 import { useState } from "react";
-// import { useAuth } from "../contexts/AuthContext"; 
-import { useNavigate, Link } from "react-router-dom"; 
+import { useNavigate, Link } from "react-router-dom";
 import '../../css/Signup.css';
 
 export default function Signup() {
-  // const { signup } = useAuth(); 
   const navigate = useNavigate();
 
-  // Form States
+  // Form states
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [agreeTerms, setAgreeTerms] = useState(false); // New State
-  
-  // UI States
-  const [error, setError] = useState(""); 
+  const [agreeTerms, setAgreeTerms] = useState(false);
+
+  // UI states
+  const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
-  const isValidEmail = (email) => {
-    const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return re.test(email);
-  };
+  const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
   const onSubmit = async (e) => {
     e.preventDefault();
     setError("");
     setIsLoading(true);
 
-    // --- 1. CHECK EMPTY FIELDS ---
+    // 1️⃣ Check empty fields
     if (!fullName || !email || !password || !confirmPassword) {
       setError("Please fill in all fields.");
       setIsLoading(false);
       return;
     }
 
-    // --- 2. CHECK EMAIL FORMAT ---
+    // 2️⃣ Check email format
     if (!isValidEmail(email)) {
       setError("Invalid email format.");
       setIsLoading(false);
       return;
     }
 
-    // --- 3. CHECK PASSWORD LENGTH ---
+    // 3️⃣ Check password length
     if (password.length < 6) {
       setError("Password must be at least 6 characters.");
       setIsLoading(false);
       return;
     }
 
-    // --- 4. CHECK PASSWORDS MATCH ---
+    // 4️⃣ Check passwords match
     if (password !== confirmPassword) {
       setError("Passwords do not match.");
       setIsLoading(false);
       return;
     }
 
-    // --- 5. CHECK TERMS (NEW) ---
+    // 5️⃣ Check terms
     if (!agreeTerms) {
       setError("You must agree to the Terms & Conditions.");
       setIsLoading(false);
       return;
     }
 
-    // --- 6. SIMULATE API SIGNUP ---
+    // 6️⃣ Call .NET API
     try {
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      // await signup(email, password, fullName);
-      navigate('/dashboard'); 
+      const response = await fetch("https://localhost:7262/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fullName, email, password }),
+      });
+
+      const data = await response.json(); // parse JSON
+
+      if (!response.ok) {
+        setError(data?.message || "Failed to create account");
+        return;
+      }
+
+      console.log("User created:", data);
+      navigate("/Login");
+
     } catch (err) {
-      setError("Failed to create account. Try again.");
+      console.error("Signup fetch error:", err);
+      setError(err.message || "Failed to create account");
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Logic for highlighting errors
+  // Error highlighting logic
   const isNameError = error && error.includes("fields");
   const isEmailError = error && (error.toLowerCase().includes("email") || error.includes("fields"));
   const isPassError = error && (error.toLowerCase().includes("password") || error.includes("fields") || error.includes("match"));
-  const isTermsError = error && (error.includes("Terms"));
+  const isTermsError = error && error.includes("Terms");
 
   return (
     <div className="signup-page-wrapper">
       <div className="signup-card-container">
-        
+
         {/* LEFT SIDE: FORM */}
         <div className="signup-form-side">
           <div className="form-content">
             <Link to="/" className="brand-logo">
               <span className="logo-icon">📦</span> StockMaster
             </Link>
-            
+
             <div className="header-text">
               <h2>Create Account</h2>
               <p>Start managing your inventory today.</p>
             </div>
 
-            {/* Error Alert Box */}
             {error && (
               <div className="error-alert">
                 <span className="error-icon">⚠️</span>
@@ -106,7 +114,7 @@ export default function Signup() {
             )}
 
             <form onSubmit={onSubmit}>
-              
+
               {/* Full Name */}
               <div className="input-group compact">
                 <label>Full Name</label>
@@ -116,10 +124,7 @@ export default function Signup() {
                     type="text"
                     placeholder="John Doe"
                     value={fullName}
-                    onChange={(e) => {
-                      setFullName(e.target.value);
-                      if (error) setError("");
-                    }}
+                    onChange={(e) => { setFullName(e.target.value); if (error) setError(""); }}
                   />
                 </div>
               </div>
@@ -133,10 +138,7 @@ export default function Signup() {
                     type="text"
                     placeholder="name@company.com"
                     value={email}
-                    onChange={(e) => {
-                      setEmail(e.target.value);
-                      if (error) setError("");
-                    }}
+                    onChange={(e) => { setEmail(e.target.value); if (error) setError(""); }}
                   />
                 </div>
               </div>
@@ -150,10 +152,7 @@ export default function Signup() {
                     type="password"
                     placeholder="Create a password"
                     value={password}
-                    onChange={(e) => {
-                      setPassword(e.target.value);
-                      if (error) setError("");
-                    }}
+                    onChange={(e) => { setPassword(e.target.value); if (error) setError(""); }}
                   />
                 </div>
               </div>
@@ -167,24 +166,18 @@ export default function Signup() {
                     type="password"
                     placeholder="Repeat password"
                     value={confirmPassword}
-                    onChange={(e) => {
-                      setConfirmPassword(e.target.value);
-                      if (error) setError("");
-                    }}
+                    onChange={(e) => { setConfirmPassword(e.target.value); if (error) setError(""); }}
                   />
                 </div>
               </div>
 
-              {/* CHECKBOX WITH ERROR HANDLING */}
+              {/* Terms */}
               <div className={`terms-group ${isTermsError ? 'error-terms' : ''}`}>
                 <label className="checkbox-label">
-                  <input 
-                    type="checkbox" 
+                  <input
+                    type="checkbox"
                     checked={agreeTerms}
-                    onChange={(e) => {
-                      setAgreeTerms(e.target.checked);
-                      if (error) setError("");
-                    }}
+                    onChange={(e) => { setAgreeTerms(e.target.checked); if (error) setError(""); }}
                   />
                   <span>I agree to the <a href="#">Terms</a> and <a href="#">Privacy Policy</a>.</span>
                 </label>

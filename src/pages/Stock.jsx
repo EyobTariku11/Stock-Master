@@ -2,16 +2,16 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import Swal from 'sweetalert2';
 import * as XLSX from 'xlsx';
-import '../../css/Stock.css'; 
+import '../../css/Stock.css';
 
 export default function AdminStocks() {
   const navigate = useNavigate();
 
   // --- STATE MANAGEMENT ---
-  const [activeView, setActiveView] = useState("inventory"); 
+  const [activeView, setActiveView] = useState("inventory");
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth > 900);
   const [searchTerm, setSearchTerm] = useState("");
-  
+
   // Date Filter State for Sales
   const [salesDateFilter, setSalesDateFilter] = useState("");
 
@@ -21,7 +21,10 @@ export default function AdminStocks() {
   const itemsPerPage = 5;
 
   // Settings State (Used for 'Approved By')
-  const [profile, setProfile] = useState({ name: "Stock Manager", email: "manager@stockmaster.com" });
+  const [profile, setProfile] = useState(() => {
+    const storedUser = localStorage.getItem("loggedInUser");
+    return storedUser ? JSON.parse(storedUser) : { name: "Stock Manager", email: "manager@stockmaster.com" };
+  });
   const [passwords, setPasswords] = useState({ current: "", new: "", confirm: "" });
 
   // --- DATA STATE ---
@@ -57,7 +60,7 @@ export default function AdminStocks() {
   const lowStockCount = products.filter(p => p.stock <= p.minStock).length;
 
   // --- FILTERING & PAGINATION LOGIC ---
-  
+
   // 1. Inventory Logic
   const filteredProducts = products.filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase()));
   const indexOfLastProd = inventoryPage * itemsPerPage;
@@ -104,7 +107,7 @@ export default function AdminStocks() {
 
     if (formValues) {
       const [name, cat, price, stock] = formValues;
-      if(!name || !price || !stock) return Swal.fire('Error', 'Please fill all fields', 'error');
+      if (!name || !price || !stock) return Swal.fire('Error', 'Please fill all fields', 'error');
 
       const newProduct = {
         id: Date.now(),
@@ -123,53 +126,53 @@ export default function AdminStocks() {
 
   const handleStockAdjustment = async (product, type) => {
     const isSale = type === 'sell';
-    
+
     let quantity, soldBy;
 
     // --- CASE 1: SELLING (MINUS) ---
     if (isSale) {
-        const { value: formValues } = await Swal.fire({
-            title: `Sell ${product.name}`,
-            html: `
+      const { value: formValues } = await Swal.fire({
+        title: `Sell ${product.name}`,
+        html: `
                 <div style="text-align:left; font-size:0.9rem; font-weight:600; margin-bottom:5px; color:#64748b;">Quantity Sold (Max: ${product.stock})</div>
                 <input id="swal-qty" type="number" class="swal2-input" placeholder="Enter quantity" style="margin-top:0;">
                 <div style="text-align:left; font-size:0.9rem; font-weight:600; margin-bottom:5px; margin-top:15px; color:#64748b;">Sold By (Salesperson)</div>
                 <input id="swal-salesperson" type="text" class="swal2-input" placeholder="Enter name" style="margin-top:0;">
             `,
-            focusConfirm: false,
-            showCancelButton: true,
-            confirmButtonColor: '#ef4444',
-            confirmButtonText: 'Confirm Sale',
-            preConfirm: () => {
-                const q = document.getElementById('swal-qty').value;
-                const s = document.getElementById('swal-salesperson').value;
-                if (!q || q <= 0) return Swal.showValidationMessage('Please enter a valid quantity');
-                if (parseInt(q) > product.stock) return Swal.showValidationMessage('Insufficient stock!');
-                if (!s) return Swal.showValidationMessage('Please enter salesperson name');
-                return [q, s];
-            }
-        });
-        
-        if (formValues) {
-            quantity = parseInt(formValues[0]);
-            soldBy = formValues[1];
+        focusConfirm: false,
+        showCancelButton: true,
+        confirmButtonColor: '#ef4444',
+        confirmButtonText: 'Confirm Sale',
+        preConfirm: () => {
+          const q = document.getElementById('swal-qty').value;
+          const s = document.getElementById('swal-salesperson').value;
+          if (!q || q <= 0) return Swal.showValidationMessage('Please enter a valid quantity');
+          if (parseInt(q) > product.stock) return Swal.showValidationMessage('Insufficient stock!');
+          if (!s) return Swal.showValidationMessage('Please enter salesperson name');
+          return [q, s];
         }
+      });
 
-    // --- CASE 2: RESTOCKING (PLUS) ---
+      if (formValues) {
+        quantity = parseInt(formValues[0]);
+        soldBy = formValues[1];
+      }
+
+      // --- CASE 2: RESTOCKING (PLUS) ---
     } else {
-        const { value } = await Swal.fire({
-            title: `Restock ${product.name}`,
-            input: 'number',
-            inputLabel: 'Enter amount to add',
-            inputPlaceholder: 'Enter quantity',
-            showCancelButton: true,
-            confirmButtonColor: '#10b981',
-            confirmButtonText: 'Add Stock',
-            inputValidator: (value) => {
-                if (!value || value <= 0) return 'Invalid number!';
-            }
-        });
-        if (value) quantity = parseInt(value);
+      const { value } = await Swal.fire({
+        title: `Restock ${product.name}`,
+        input: 'number',
+        inputLabel: 'Enter amount to add',
+        inputPlaceholder: 'Enter quantity',
+        showCancelButton: true,
+        confirmButtonColor: '#10b981',
+        confirmButtonText: 'Add Stock',
+        inputValidator: (value) => {
+          if (!value || value <= 0) return 'Invalid number!';
+        }
+      });
+      if (value) quantity = parseInt(value);
     }
 
     // --- UPDATE STATE IF QUANTITY EXISTS ---
@@ -222,24 +225,24 @@ export default function AdminStocks() {
   // --- EXCEL EXPORT (Updated with new columns) ---
   const handleDownloadExcel = () => {
     const inventoryData = products.map(p => ({
-        ID: p.id,
-        Name: p.name,
-        Category: p.category,
-        Price: p.price,
-        Stock: p.stock,
-        Status: p.status
+      ID: p.id,
+      Name: p.name,
+      Category: p.category,
+      Price: p.price,
+      Stock: p.stock,
+      Status: p.status
     }));
 
     const salesDataToExport = salesDateFilter ? filteredSales : salesLog;
-    
+
     const salesData = salesDataToExport.map(s => ({
-        TransactionID: s.id,
-        Date: s.date,
-        Product: s.product,
-        Quantity: s.quantity,
-        TotalRevenue: s.total,
-        SoldBy: s.soldBy,        // New Column
-        ApprovedBy: s.approvedBy // New Column
+      TransactionID: s.id,
+      Date: s.date,
+      Product: s.product,
+      Quantity: s.quantity,
+      TotalRevenue: s.total,
+      SoldBy: s.soldBy,        // New Column
+      ApprovedBy: s.approvedBy // New Column
     }));
 
     const wb = XLSX.utils.book_new();
@@ -254,12 +257,57 @@ export default function AdminStocks() {
   };
 
   // --- SETTINGS HANDLERS ---
-  const handleProfileUpdate = (e) => {
+  const handleProfileUpdate = async (e) => {
     e.preventDefault();
-    Swal.fire('Profile Updated', `Saved changes for ${profile.name}`, 'success');
+  
+    // Get logged-in user from localStorage
+    const loggedUser = JSON.parse(localStorage.getItem("loggedInUser"));
+    if (!loggedUser || !loggedUser.id) {
+      return Swal.fire('Error', 'User not found. Please login again.', 'error');
+    }
+  
+    try {
+      const response = await fetch(`https://localhost:7262/api/auth/update-profile/${loggedUser.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fullName: profile.name,
+          email: profile.email
+        })
+      });
+  
+      let data;
+      const contentType = response.headers.get("content-type");
+  
+      // Try to parse JSON if possible, otherwise read as text
+      if (contentType && contentType.includes("application/json")) {
+        data = await response.json();
+      } else {
+        data = { message: await response.text() };
+      }
+  
+      if (!response.ok) {
+        // Show the exact error from the backend
+        throw new Error(data?.message || "Failed to update profile");
+      }
+  
+      // Update local state and localStorage
+      setProfile({ name: data.fullName, email: data.email, id: loggedUser.id });
+      localStorage.setItem(
+        "loggedInUser",
+        JSON.stringify({ ...loggedUser, name: data.fullName, email: data.email })
+      );
+  
+      Swal.fire('Success', 'Profile updated successfully!', 'success');
+    } catch (err) {
+      // Show the real backend error
+      Swal.fire('Error', err.message || 'Unknown error occurred', 'error');
+    }
   };
+  
+  
 
-  const handlePasswordChange = (e) => {
+  const handlePasswordChange = async (e) => {
     e.preventDefault();
     if (!passwords.current || !passwords.new || !passwords.confirm) {
       return Swal.fire('Error', 'Please fill all password fields', 'error');
@@ -267,18 +315,35 @@ export default function AdminStocks() {
     if (passwords.new !== passwords.confirm) {
       return Swal.fire('Error', 'New passwords do not match', 'error');
     }
-    if (passwords.new.length < 6) {
-      return Swal.fire('Error', 'Password must be at least 6 characters', 'error');
+  
+    const userId = JSON.parse(localStorage.getItem("loggedInUser"))?.id;
+    if (!userId) return Swal.fire('Error', 'User not found', 'error');
+  
+    try {
+      const response = await fetch(`https://localhost:7262/api/auth/change-password/${userId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentPassword: passwords.current, newPassword: passwords.new })
+      });
+  
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.message || "Failed to change password");
+      }
+  
+      setPasswords({ current: "", new: "", confirm: "" });
+      Swal.fire('Success', 'Password changed successfully!', 'success');
+    } catch (err) {
+      Swal.fire('Error', err.message, 'error');
     }
-    setPasswords({ current: "", new: "", confirm: "" });
-    Swal.fire('Success', 'Password has been changed successfully', 'success');
   };
+  
 
   const handleLogout = () => {
     Swal.fire({
       title: 'Sign Out?', icon: 'question', showCancelButton: true, confirmButtonText: 'Log Out'
     }).then((res) => {
-      if(res.isConfirmed) navigate('/login');
+      if (res.isConfirmed) navigate('/login');
     });
   };
 
@@ -294,8 +359,11 @@ export default function AdminStocks() {
         </div>
         <div className="header-right">
           <div className="admin-profile">
-            <div className="text-info"><span className="name">{profile.name}</span><span className="role">Manager</span></div>
-            <div className="avatar">SM</div>
+            <div className="text-info">
+              <span className="name">{profile.name}</span>
+              <span className="role">Manager</span>
+            </div>
+            <div className="avatar">{profile.name.split(' ').map(n => n[0]).join('')}</div>
           </div>
           <button className="header-logout-btn" onClick={handleLogout} title="Logout">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
@@ -323,7 +391,7 @@ export default function AdminStocks() {
         {/* MAIN CONTENT AREA */}
         <main className="main-content">
           <div className="content-wrapper">
-            
+
             {/* --- VIEW 1: INVENTORY --- */}
             {activeView === 'inventory' && (
               <div className="fade-in">
@@ -383,14 +451,14 @@ export default function AdminStocks() {
                                     <span className={`stock-value ${p.stock <= p.minStock ? 'low' : ''}`}>{p.stock}</span>
                                     <button className="stock-btn plus" onClick={() => handleStockAdjustment(p, 'restock')}>+</button>
                                   </div>
-                                  </td>
-                                  <td className="text-center">
-                                    <span className={`status-badge ${p.status.toLowerCase().replace(/\s/g, '-')}`}>{p.status}</span>
-                                  </td>
-                                  <td className="text-right">
-                                    <button className="icon-btn delete" onClick={() => handleDelete(p.id)}>🗑️</button>
-                                  </td>
-                                </tr>
+                                </td>
+                                <td className="text-center">
+                                  <span className={`status-badge ${p.status.toLowerCase().replace(/\s/g, '-')}`}>{p.status}</span>
+                                </td>
+                                <td className="text-right">
+                                  <button className="icon-btn delete" onClick={() => handleDelete(p.id)}>🗑️</button>
+                                </td>
+                              </tr>
                             ))
                           ) : (
                             <tr><td colSpan="6" className="text-center">No products found.</td></tr>
@@ -402,25 +470,25 @@ export default function AdminStocks() {
                     {/* Pagination for Inventory */}
                     {totalInventoryPages > 1 && (
                       <div className="pagination-container">
-                        <button 
-                          className="page-btn nav" 
-                          onClick={() => paginateInventory(inventoryPage - 1)} 
+                        <button
+                          className="page-btn nav"
+                          onClick={() => paginateInventory(inventoryPage - 1)}
                           disabled={inventoryPage === 1}
                         >
                           &lt;
                         </button>
                         {[...Array(totalInventoryPages)].map((_, i) => (
-                          <button 
-                            key={i} 
+                          <button
+                            key={i}
                             className={`page-btn ${inventoryPage === i + 1 ? 'active' : ''}`}
                             onClick={() => paginateInventory(i + 1)}
                           >
                             {i + 1}
                           </button>
                         ))}
-                        <button 
-                          className="page-btn nav" 
-                          onClick={() => paginateInventory(inventoryPage + 1)} 
+                        <button
+                          className="page-btn nav"
+                          onClick={() => paginateInventory(inventoryPage + 1)}
                           disabled={inventoryPage === totalInventoryPages}
                         >
                           &gt;
@@ -440,26 +508,26 @@ export default function AdminStocks() {
                     <h2>Sales History</h2>
                     <p className="subtitle">Track every transaction made from the inventory.</p>
                   </div>
-                  <div className="header-actions" style={{display:'flex', gap:'10px'}}>
-                     {/* Date Filter Input */}
-                     <input 
-                        type="date" 
-                        className="form-input" 
-                        style={{width: 'auto', padding: '8px 12px'}}
-                        value={salesDateFilter}
-                        onChange={(e) => { setSalesDateFilter(e.target.value); setSalesPage(1); }}
-                     />
-                     <button className="secondary-btn" onClick={handleDownloadExcel}>⬇ Download Report</button>
+                  <div className="header-actions" style={{ display: 'flex', gap: '10px' }}>
+                    {/* Date Filter Input */}
+                    <input
+                      type="date"
+                      className="form-input"
+                      style={{ width: 'auto', padding: '8px 12px' }}
+                      value={salesDateFilter}
+                      onChange={(e) => { setSalesDateFilter(e.target.value); setSalesPage(1); }}
+                    />
+                    <button className="secondary-btn" onClick={handleDownloadExcel}>⬇ Download Report</button>
                   </div>
                 </div>
 
                 <div className="admin-card">
-                   <div className="card-header-simple" style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
-                      <h3>{salesDateFilter ? `Transactions on ${salesDateFilter}` : 'All Transactions'}</h3>
-                      <div className="stat-value text-success" style={{fontSize: '1rem'}}>
-                          Revenue: ${filteredSales.reduce((a,b)=>a+b.total, 0).toLocaleString()}
-                      </div>
-                   </div>
+                  <div className="card-header-simple" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <h3>{salesDateFilter ? `Transactions on ${salesDateFilter}` : 'All Transactions'}</h3>
+                    <div className="stat-value text-success" style={{ fontSize: '1rem' }}>
+                      Revenue: ${filteredSales.reduce((a, b) => a + b.total, 0).toLocaleString()}
+                    </div>
+                  </div>
                   <div className="card-body">
                     <div className="table-responsive">
                       <table className="custom-table">
@@ -480,7 +548,7 @@ export default function AdminStocks() {
                                 <td className="text-left text-muted">{sale.date}</td>
                                 <td className="text-left font-weight-600">{sale.product}</td>
                                 <td className="text-center">{sale.soldBy || "-"}</td>
-                                <td className="text-center"><span style={{background:'#f1f5f9', padding:'2px 8px', borderRadius:'4px', fontSize:'0.8rem'}}>{sale.approvedBy}</span></td>
+                                <td className="text-center"><span style={{ background: '#f1f5f9', padding: '2px 8px', borderRadius: '4px', fontSize: '0.8rem' }}>{sale.approvedBy}</span></td>
                                 <td className="text-center">{sale.quantity}</td>
                                 <td className="text-right text-success font-weight-bold">+${sale.total.toLocaleString()}</td>
                               </tr>
@@ -495,25 +563,25 @@ export default function AdminStocks() {
                     {/* Pagination for Sales */}
                     {totalSalesPages > 1 && (
                       <div className="pagination-container">
-                        <button 
-                          className="page-btn nav" 
-                          onClick={() => paginateSales(salesPage - 1)} 
+                        <button
+                          className="page-btn nav"
+                          onClick={() => paginateSales(salesPage - 1)}
                           disabled={salesPage === 1}
                         >
                           &lt;
                         </button>
                         {[...Array(totalSalesPages)].map((_, i) => (
-                          <button 
-                            key={i} 
+                          <button
+                            key={i}
                             className={`page-btn ${salesPage === i + 1 ? 'active' : ''}`}
                             onClick={() => paginateSales(i + 1)}
                           >
                             {i + 1}
                           </button>
                         ))}
-                        <button 
-                          className="page-btn nav" 
-                          onClick={() => paginateSales(salesPage + 1)} 
+                        <button
+                          className="page-btn nav"
+                          onClick={() => paginateSales(salesPage + 1)}
                           disabled={salesPage === totalSalesPages}
                         >
                           &gt;
@@ -531,7 +599,7 @@ export default function AdminStocks() {
               <div className="fade-in">
                 <h2 className="mb-20">Account Settings</h2>
                 <div className="settings-grid-layout">
-                  
+
                   {/* Profile Form */}
                   <div className="admin-card">
                     <div className="card-header-simple"><h3>Profile Information</h3></div>
@@ -539,20 +607,20 @@ export default function AdminStocks() {
                       <div className="card-body">
                         <div className="form-group">
                           <label>Full Name</label>
-                          <input 
-                            type="text" 
-                            className="form-input" 
+                          <input
+                            type="text"
+                            className="form-input"
                             value={profile.name}
-                            onChange={(e) => setProfile({...profile, name: e.target.value})}
+                            onChange={(e) => setProfile({ ...profile, name: e.target.value })}
                           />
                         </div>
                         <div className="form-group">
                           <label>Email Address</label>
-                          <input 
-                            type="email" 
-                            className="form-input" 
+                          <input
+                            type="email"
+                            className="form-input"
                             value={profile.email}
-                            onChange={(e) => setProfile({...profile, email: e.target.value})}
+                            onChange={(e) => setProfile({ ...profile, email: e.target.value })}
                           />
                         </div>
                       </div>
@@ -569,30 +637,30 @@ export default function AdminStocks() {
                       <div className="card-body">
                         <div className="form-group">
                           <label>Current Password</label>
-                          <input 
-                            type="password" 
-                            className="form-input" 
+                          <input
+                            type="password"
+                            className="form-input"
                             value={passwords.current}
-                            onChange={(e) => setPasswords({...passwords, current: e.target.value})}
+                            onChange={(e) => setPasswords({ ...passwords, current: e.target.value })}
                           />
                         </div>
                         <div className="form-group">
                           <label>New Password</label>
-                          <input 
-                            type="password" 
-                            className="form-input" 
+                          <input
+                            type="password"
+                            className="form-input"
                             placeholder="Min 6 characters"
                             value={passwords.new}
-                            onChange={(e) => setPasswords({...passwords, new: e.target.value})}
+                            onChange={(e) => setPasswords({ ...passwords, new: e.target.value })}
                           />
                         </div>
                         <div className="form-group">
                           <label>Confirm Password</label>
-                          <input 
-                            type="password" 
-                            className="form-input" 
+                          <input
+                            type="password"
+                            className="form-input"
                             value={passwords.confirm}
-                            onChange={(e) => setPasswords({...passwords, confirm: e.target.value})}
+                            onChange={(e) => setPasswords({ ...passwords, confirm: e.target.value })}
                           />
                         </div>
                       </div>

@@ -193,7 +193,7 @@ body { margin: 0; padding: 0; font-family: 'Inter', system-ui, sans-serif; backg
   cursor: not-allowed;
 }
 
-/* Responsive */
+/* Responsive pagessss */
 @media (max-width: 900px) {
   .sidebar { position: absolute; height: 100%; z-index: 50; box-shadow: 2px 0 10px rgba(0,0,0,0.1); }
   .settings-grid-layout { grid-template-columns: 1fr; }

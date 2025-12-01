@@ -13,6 +13,37 @@ export default function Login() {
 
   const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
+  // 🔍 Periodically check if the user is still ACTIVE
+  const startStatusWatcher = (userId) => {
+    if (window._statusCheckInterval) {
+      clearInterval(window._statusCheckInterval);
+    }
+
+    window._statusCheckInterval = setInterval(async () => {
+      try {
+        const res = await fetch(`https://localhost:7262/api/auth/check-status/${userId}`);
+        const data = await res.json();
+
+        if (!data.isActive) {
+          clearInterval(window._statusCheckInterval);
+          window._statusCheckInterval = null;
+
+          localStorage.removeItem("loggedInUser");
+
+          Swal.fire({
+            icon: "warning",
+            title: "Access Revoked",
+            text: "Your account has been deactivated by an admin.",
+          }).then(() => {
+            navigate("/login");
+          });
+        }
+      } catch (err) {
+        console.error("Status check failed:", err);
+      }
+    }, 5000); // checks every 5 seconds
+  };
+
   const onSubmit = async (e) => {
     e.preventDefault();
     setError("");
@@ -37,22 +68,20 @@ export default function Login() {
         body: JSON.stringify({ email, password })
       });
 
-      // Parse JSON regardless of status
       const data = await response.json();
 
       if (!response.ok) {
-        // Use backend error message if available
-        const message = data?.message || JSON.stringify(data) || "Invalid email or password.";
+        const message = data?.message || "Invalid email or password.";
         throw new Error(message);
       }
 
       console.log("Login API response:", data);
 
-      // Save full user info including ID (important for updates)
       const user = {
-        id: data.id || data.userId || null,  // Make sure backend returns Id!
+        id: data.id || null,
         name: data.fullName || data.name || "User",
         email: data.email || email,
+        role: data.role || "Viewer",  // 👈 add role
         token: data.token || "fake-jwt-token"
       };
 
@@ -62,6 +91,9 @@ export default function Login() {
 
       localStorage.setItem("loggedInUser", JSON.stringify(user));
 
+      // ✅ Start watcher to catch immediate revoke
+      startStatusWatcher(user.id);
+
       await Swal.fire({
         title: "Login Successful!",
         text: `Welcome back, ${user.name}!`,
@@ -69,11 +101,16 @@ export default function Login() {
         confirmButtonText: "Continue",
       });
 
-      navigate("/stock");
+      // 🚀 ROLE-BASED REDIRECT HERE
+      if (user.role === "Admin") {
+        navigate("/admin");
+      } else {
+        navigate("/stock");
+      }
 
     } catch (err) {
       console.error(err);
-      setError(err.message || "Failed to sign in. Please check your credentials.");
+      setError(err.message || "Failed to sign in.");
     } finally {
       setIsLoading(false);
     }
@@ -90,16 +127,19 @@ export default function Login() {
             <Link to="/" className="brand-logo">
               <span className="logo-icon">📦</span> StockMaster
             </Link>
+
             <div className="header-text">
               <h2>Welcome Back</h2>
               <p>Enter your email and password to access your dashboard.</p>
             </div>
+
             {error && (
               <div className="error-alert">
                 <span className="error-icon">⚠️</span>
                 <span>{error}</span>
               </div>
             )}
+
             <form onSubmit={onSubmit}>
               <div className="input-group">
                 <label>Email Address</label>
@@ -113,6 +153,7 @@ export default function Login() {
                   />
                 </div>
               </div>
+
               <div className="input-group">
                 <label>Password</label>
                 <div className={`input-wrapper ${isPasswordError ? "error" : ""}`}>
@@ -125,6 +166,7 @@ export default function Login() {
                   />
                 </div>
               </div>
+
               <div className="form-options">
                 <label className="checkbox-label">
                   <input type="checkbox" />
@@ -132,15 +174,18 @@ export default function Login() {
                 </label>
                 <a href="#" className="forgot-link">Forgot Password?</a>
               </div>
+
               <button type="submit" className="submit-btn" disabled={isLoading}>
                 {isLoading ? <div className="spinner"></div> : "Sign In"}
               </button>
             </form>
+
             <div className="footer-text">
               <p>Don't have an account? <Link to="/signup">Create free account</Link></p>
             </div>
           </div>
         </div>
+
         <div className="login-image-side">
           <div className="image-overlay">
             <div className="overlay-text">
@@ -149,6 +194,7 @@ export default function Login() {
             </div>
           </div>
         </div>
+
       </div>
     </div>
   );

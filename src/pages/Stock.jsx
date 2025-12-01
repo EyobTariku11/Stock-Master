@@ -11,80 +11,142 @@ export default function AdminStocks() {
   const [activeView, setActiveView] = useState("inventory");
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth > 900);
   const [searchTerm, setSearchTerm] = useState("");
-
-  // Date Filter State for Sales
   const [salesDateFilter, setSalesDateFilter] = useState("");
 
-  // --- PAGINATION STATE ---
+  // Pagination State
   const [inventoryPage, setInventoryPage] = useState(1);
   const [salesPage, setSalesPage] = useState(1);
   const itemsPerPage = 5;
 
-  // Settings State (Used for 'Approved By')
+  // Profile State
   const [profile, setProfile] = useState(() => {
     const storedUser = localStorage.getItem("loggedInUser");
-    return storedUser ? JSON.parse(storedUser) : { name: "Stock Manager", email: "manager@stockmaster.com" };
+    return storedUser
+      ? JSON.parse(storedUser)
+      : { name: "Stock Manager", email: "manager@stockmaster.com", status: "active" };
   });
+
   const [passwords, setPasswords] = useState({ current: "", new: "", confirm: "" });
 
   // --- DATA STATE ---
-  const [products, setProducts] = useState([
-    { id: 101, name: "Nike Air Max", category: "Footwear", price: 120, stock: 45, minStock: 10, status: "In Stock" },
-    { id: 102, name: "Gaming Mouse", category: "Electronics", price: 55, stock: 8, minStock: 15, status: "Low Stock" },
-    { id: 103, name: "Cotton T-Shirt", category: "Clothing", price: 25, stock: 200, minStock: 50, status: "In Stock" },
-    { id: 104, name: "Mechanical Keyboard", category: "Electronics", price: 150, stock: 0, minStock: 5, status: "Out of Stock" },
-    { id: 105, name: "Coffee Maker", category: "Home", price: 89, stock: 24, minStock: 10, status: "In Stock" },
-    { id: 106, name: "Wireless Headset", category: "Electronics", price: 89, stock: 15, minStock: 5, status: "In Stock" },
-    { id: 107, name: "Yoga Mat", category: "Fitness", price: 20, stock: 50, minStock: 10, status: "In Stock" },
-    { id: 108, name: "Running Shoes", category: "Footwear", price: 95, stock: 4, minStock: 5, status: "Low Stock" },
-  ]);
+  const [products, setProducts] = useState([]); 
+  const [salesLog, setSalesLog] = useState([]); // Fetched from API
+  const [isLoading, setIsLoading] = useState(true);
 
-  const [salesLog, setSalesLog] = useState([
-    { id: 1, product: "Nike Air Max", quantity: 2, total: 240, date: "2025-11-28 10:30 AM", soldBy: "John Doe", approvedBy: "Stock Manager" },
-    { id: 2, product: "Cotton T-Shirt", quantity: 5, total: 125, date: "2025-11-27 02:15 PM", soldBy: "Jane Smith", approvedBy: "Admin User" },
-    { id: 3, product: "Gaming Mouse", quantity: 1, total: 55, date: "2025-11-26 09:00 AM", soldBy: "Mike Ross", approvedBy: "Stock Manager" },
-    { id: 4, product: "Coffee Maker", quantity: 1, total: 89, date: "2025-11-25 04:30 PM", soldBy: "John Doe", approvedBy: "Admin User" },
-    { id: 5, product: "Yoga Mat", quantity: 2, total: 40, date: "2025-11-25 11:20 AM", soldBy: "Jane Smith", approvedBy: "Stock Manager" },
-    { id: 6, product: "Nike Air Max", quantity: 1, total: 120, date: "2025-11-24 01:10 PM", soldBy: "Mike Ross", approvedBy: "Stock Manager" },
-  ]);
+  // --- 1. FETCH DATA (Products & Sales) ---
+  useEffect(() => {
+    fetchProducts();
+    fetchSales();
+  }, []);
 
-  // Responsive Sidebar
+  // Fetch Products
+  const fetchProducts = async () => {
+    try {
+      const res = await fetch("https://localhost:7262/api/products");
+      if (!res.ok) throw new Error("Failed to connect to server");
+      
+      const data = await res.json();
+      
+      // Map API data (PascalCase) to UI data (camelCase)
+      const formattedProducts = data.map(p => ({
+        id: p.id || p.Id,
+        name: p.name || p.Name,
+        category: p.category || p.Category || "Uncategorized",
+        price: p.price || p.Price,
+        stock: p.stock || p.Stock,
+        minStock: p.minStock || p.MinStock || 10,
+        status: (p.stock || p.Stock) === 0 ? "Out of Stock" : (p.stock || p.Stock) <= (p.minStock || p.MinStock || 10) ? "Low Stock" : "In Stock"
+      }));
+
+      setProducts(formattedProducts);
+    } catch (err) {
+      console.error(err);
+      Swal.fire({
+        icon: 'error',
+        title: 'Connection Error',
+        text: 'Could not load products. Is the backend running?',
+        toast: true, position: 'top-end', timer: 3000, showConfirmButton: false
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Fetch Sales History
+  const fetchSales = async () => {
+    try {
+      const res = await fetch("https://localhost:7262/api/sales");
+      if (!res.ok) return;
+      const data = await res.json();
+      
+      const formattedSales = data.map(s => ({
+        id: s.id || s.Id,
+        product: s.productName || s.ProductName,
+        quantity: s.quantity || s.Quantity,
+        total: s.totalPrice || s.TotalPrice,
+        date: new Date(s.dateSold || s.DateSold).toLocaleString(),
+        rawDate: s.dateSold || s.DateSold, // For filtering
+        soldBy: s.soldBy || s.SoldBy,
+        approvedBy: s.approvedBy || s.ApprovedBy
+      }));
+      setSalesLog(formattedSales);
+    } catch (err) {
+      console.error("Sales fetch error", err);
+    }
+  };
+
+  // --- CHECK USER STATUS ---
+  useEffect(() => {
+    const checkStatus = async () => {
+      const user = JSON.parse(localStorage.getItem("loggedInUser"));
+      if (!user) return;
+      try {
+        const res = await fetch(`https://localhost:7262/api/auth/user-status/${user.id}`, { cache: "no-store" });
+        const data = await res.json();
+        if (!data.status || data.status.toLowerCase() !== "active") {
+          localStorage.removeItem("loggedInUser");
+          Swal.fire({ icon: "error", title: "Access Revoked", text: "Your account has been deactivated.", allowOutsideClick: false })
+            .then(() => navigate("/login"));
+        }
+      } catch (err) { console.error("Status check failed:", err); }
+    };
+    checkStatus();
+    const interval = setInterval(checkStatus, 8000);
+    return () => clearInterval(interval);
+  }, [navigate]);
+  
+  // --- RESPONSIVE SIDEBAR ---
   useEffect(() => {
     const handleResize = () => setIsSidebarOpen(window.innerWidth > 900);
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // --- CALCULATIONS ---
+  // --- CALCULATIONS & FILTERING ---
   const totalRevenue = salesLog.reduce((acc, sale) => acc + sale.total, 0);
   const lowStockCount = products.filter(p => p.stock <= p.minStock).length;
 
-  // --- FILTERING & PAGINATION LOGIC ---
-
-  // 1. Inventory Logic
+  // Inventory Logic
   const filteredProducts = products.filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase()));
+  const totalInventoryPages = Math.ceil(filteredProducts.length / itemsPerPage);
   const indexOfLastProd = inventoryPage * itemsPerPage;
   const indexOfFirstProd = indexOfLastProd - itemsPerPage;
   const currentProducts = filteredProducts.slice(indexOfFirstProd, indexOfLastProd);
-  const totalInventoryPages = Math.ceil(filteredProducts.length / itemsPerPage);
 
-  const paginateInventory = (pageNumber) => setInventoryPage(pageNumber);
-
-  // 2. Sales Logic (With Date Filter)
+  // Sales Logic
   const filteredSales = salesLog.filter(sale => {
     if (!salesDateFilter) return true;
-    return sale.date.startsWith(salesDateFilter);
+    return sale.rawDate.startsWith(salesDateFilter);
   });
-
+  const totalSalesPages = Math.ceil(filteredSales.length / itemsPerPage);
   const indexOfLastSale = salesPage * itemsPerPage;
   const indexOfFirstSale = indexOfLastSale - itemsPerPage;
   const currentSales = filteredSales.slice(indexOfFirstSale, indexOfLastSale);
-  const totalSalesPages = Math.ceil(filteredSales.length / itemsPerPage);
 
+  const paginateInventory = (pageNumber) => setInventoryPage(pageNumber);
   const paginateSales = (pageNumber) => setSalesPage(pageNumber);
 
-  // --- HANDLERS ---
-
+  // --- 2. ADD PRODUCT (POST API) ---
   const handleAddProduct = async () => {
     const { value: formValues } = await Swal.fire({
       title: 'Add New Product',
@@ -109,36 +171,104 @@ export default function AdminStocks() {
       const [name, cat, price, stock] = formValues;
       if (!name || !price || !stock) return Swal.fire('Error', 'Please fill all fields', 'error');
 
-      const newProduct = {
-        id: Date.now(),
-        name: name,
-        category: cat || "Uncategorized",
-        price: parseFloat(price),
-        stock: parseInt(stock),
-        minStock: 10,
-        status: parseInt(stock) > 10 ? "In Stock" : "Low Stock"
+      const payload = {
+        Name: name,
+        Category: cat || "Uncategorized",
+        Price: parseFloat(price),
+        Stock: parseInt(stock),
+        MinStock: 10
       };
 
-      setProducts([newProduct, ...products]);
-      Swal.fire('Success', `${name} added.`, 'success');
+      try {
+        const res = await fetch("https://localhost:7262/api/products", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) throw new Error("Failed to add product");
+
+        fetchProducts(); 
+        Swal.fire('Success', `${name} added to database.`, 'success');
+
+      } catch (err) {
+        Swal.fire('Error', err.message, 'error');
+      }
     }
   };
 
+  // --- 2.5 EDIT PRODUCT (PUT API) ---
+  const handleEditProduct = async (product) => {
+    const { value: formValues } = await Swal.fire({
+      title: 'Edit Product',
+      html:
+        `<div style="text-align:left; margin-bottom:5px; font-size:0.9rem;">Product Name</div>` +
+        `<input id="swal-edit-name" class="swal2-input" value="${product.name}" style="margin-top:0;">` +
+        
+        `<div style="text-align:left; margin-bottom:5px; margin-top:10px; font-size:0.9rem;">Category</div>` +
+        `<input id="swal-edit-cat" class="swal2-input" value="${product.category}" style="margin-top:0;">` +
+        
+        `<div style="text-align:left; margin-bottom:5px; margin-top:10px; font-size:0.9rem;">Price ($)</div>` +
+        `<input id="swal-edit-price" type="number" class="swal2-input" value="${product.price}" style="margin-top:0;">` +
+        
+        `<div style="text-align:left; margin-bottom:5px; margin-top:10px; font-size:0.9rem;">Min Stock Alert Level</div>` +
+        `<input id="swal-edit-min" type="number" class="swal2-input" value="${product.minStock}" style="margin-top:0;">`,
+      focusConfirm: false,
+      showCancelButton: true,
+      confirmButtonText: 'Save Changes',
+      confirmButtonColor: '#3b82f6',
+      preConfirm: () => [
+        document.getElementById('swal-edit-name').value,
+        document.getElementById('swal-edit-cat').value,
+        document.getElementById('swal-edit-price').value,
+        document.getElementById('swal-edit-min').value
+      ]
+    });
+
+    if (formValues) {
+      const [name, cat, price, minStock] = formValues;
+      
+      if (!name || !price) return Swal.fire('Error', 'Name and Price are required', 'error');
+
+      try {
+        // Call the new "details" endpoint
+        const res = await fetch(`https://localhost:7262/api/products/details/${product.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            Name: name,
+            Category: cat || "Uncategorized",
+            Price: parseFloat(price),
+            MinStock: parseInt(minStock) || 10
+          })
+        });
+
+        if (!res.ok) throw new Error("Failed to update product details");
+
+        fetchProducts(); // Refresh list
+        Swal.fire('Updated!', 'Product details saved.', 'success');
+
+      } catch (err) {
+        Swal.fire('Error', err.message, 'error');
+      }
+    }
+  };
+
+  // --- 3. STOCK ADJUSTMENT (Sell or Restock) ---
   const handleStockAdjustment = async (product, type) => {
     const isSale = type === 'sell';
-
     let quantity, soldBy;
 
-    // --- CASE 1: SELLING (MINUS) ---
+    // UI Input Logic
     if (isSale) {
       const { value: formValues } = await Swal.fire({
         title: `Sell ${product.name}`,
         html: `
-                <div style="text-align:left; font-size:0.9rem; font-weight:600; margin-bottom:5px; color:#64748b;">Quantity Sold (Max: ${product.stock})</div>
-                <input id="swal-qty" type="number" class="swal2-input" placeholder="Enter quantity" style="margin-top:0;">
-                <div style="text-align:left; font-size:0.9rem; font-weight:600; margin-bottom:5px; margin-top:15px; color:#64748b;">Sold By (Salesperson)</div>
-                <input id="swal-salesperson" type="text" class="swal2-input" placeholder="Enter name" style="margin-top:0;">
-            `,
+            <div style="text-align:left; font-size:0.9rem; font-weight:600; margin-bottom:5px; color:#64748b;">Quantity Sold (Max: ${product.stock})</div>
+            <input id="swal-qty" type="number" class="swal2-input" placeholder="Enter quantity" style="margin-top:0;">
+            <div style="text-align:left; font-size:0.9rem; font-weight:600; margin-bottom:5px; margin-top:15px; color:#64748b;">Sold By</div>
+            <input id="swal-salesperson" type="text" class="swal2-input" value="${profile.name}" style="margin-top:0;">
+        `,
         focusConfirm: false,
         showCancelButton: true,
         confirmButtonColor: '#ef4444',
@@ -146,207 +276,207 @@ export default function AdminStocks() {
         preConfirm: () => {
           const q = document.getElementById('swal-qty').value;
           const s = document.getElementById('swal-salesperson').value;
-          if (!q || q <= 0) return Swal.showValidationMessage('Please enter a valid quantity');
-          if (parseInt(q) > product.stock) return Swal.showValidationMessage('Insufficient stock!');
+          if (!q || q <= 0 || parseInt(q) > product.stock) return Swal.showValidationMessage('Invalid quantity');
           if (!s) return Swal.showValidationMessage('Please enter salesperson name');
           return [q, s];
         }
       });
-
-      if (formValues) {
-        quantity = parseInt(formValues[0]);
-        soldBy = formValues[1];
-      }
-
-      // --- CASE 2: RESTOCKING (PLUS) ---
+      if (formValues) { quantity = parseInt(formValues[0]); soldBy = formValues[1]; }
     } else {
       const { value } = await Swal.fire({
         title: `Restock ${product.name}`,
         input: 'number',
         inputLabel: 'Enter amount to add',
-        inputPlaceholder: 'Enter quantity',
-        showCancelButton: true,
         confirmButtonColor: '#10b981',
         confirmButtonText: 'Add Stock',
-        inputValidator: (value) => {
-          if (!value || value <= 0) return 'Invalid number!';
-        }
+        inputValidator: (value) => { if (!value || value <= 0) return 'Invalid number!'; }
       });
       if (value) quantity = parseInt(value);
     }
 
-    // --- UPDATE STATE IF QUANTITY EXISTS ---
+    // API Execution Logic
     if (quantity) {
-      const updatedProducts = products.map(p => {
-        if (p.id === product.id) {
-          const newStock = isSale ? p.stock - quantity : p.stock + quantity;
-          let newStatus = newStock === 0 ? "Out of Stock" : (newStock <= p.minStock ? "Low Stock" : "In Stock");
-          return { ...p, stock: newStock, status: newStatus };
+      try {
+        if (isSale) {
+          // --- CALL SALES API (Records Sale + Deducts Stock) ---
+          const salePayload = {
+            ProductId: product.id,
+            Quantity: quantity,
+            SoldBy: soldBy,
+            ApprovedBy: profile.name // User from profile state
+          };
+
+          const res = await fetch("https://localhost:7262/api/sales", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(salePayload)
+          });
+
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.message || "Sale failed");
+
+          const revenue = quantity * product.price;
+          Swal.fire('Sold!', `Revenue: $${revenue.toLocaleString()}`, 'success');
+
+        } else {
+          // --- CALL PRODUCTS API (Restock Only) ---
+          const newStockLevel = product.stock + quantity;
+          const res = await fetch(`https://localhost:7262/api/products/${product.id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ 
+               id: product.id, 
+               name: product.name,
+               newStock: newStockLevel 
+            })
+          });
+
+          if (!res.ok) throw new Error("Failed to update stock");
+          Swal.fire('Restocked!', 'Inventory updated.', 'success');
         }
-        return p;
-      });
-      setProducts(updatedProducts);
 
-      if (isSale) {
-        // Date formatting
-        const now = new Date();
-        const dateString = now.toISOString().split('T')[0] + ' ' + now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        // Refresh both tables to reflect changes
+        fetchProducts();
+        fetchSales();
 
-        const saleTotal = quantity * product.price;
-        const newSale = {
-          id: Date.now(),
-          product: product.name,
-          quantity: quantity,
-          total: saleTotal,
-          date: dateString,
-          soldBy: soldBy,
-          approvedBy: profile.name // Auto-filled from login state
-        };
-        setSalesLog([newSale, ...salesLog]);
-        Swal.fire('Sold!', `Revenue: $${saleTotal.toLocaleString()}`, 'success');
-      } else {
-        Swal.fire('Restocked!', 'Inventory updated.', 'success');
+      } catch (err) {
+        Swal.fire('Error', err.message, 'error');
       }
     }
   };
 
+  // --- 4. DELETE PRODUCT (DELETE API) ---
   const handleDelete = (id) => {
     Swal.fire({
       title: 'Delete Product?', text: "Irreversible action.", icon: 'warning',
       showCancelButton: true, confirmButtonColor: '#d33', confirmButtonText: 'Delete'
-    }).then((result) => {
+    }).then(async (result) => {
       if (result.isConfirmed) {
-        setProducts(products.filter(p => p.id !== id));
-        Swal.fire('Deleted!', 'Product removed.', 'success');
+        try {
+          const res = await fetch(`https://localhost:7262/api/products/${id}`, { method: "DELETE" });
+          if (!res.ok) throw new Error("Failed to delete product");
+          
+          fetchProducts();
+          Swal.fire('Deleted!', 'Product removed from database.', 'success');
+        } catch (err) {
+          Swal.fire('Error', err.message, 'error');
+        }
       }
     });
   };
 
-  // --- EXCEL EXPORT (Updated with new columns) ---
+  // --- EXCEL DOWNLOAD (With Approved By) ---
   const handleDownloadExcel = () => {
+    // 1. Prepare Inventory Sheet
     const inventoryData = products.map(p => ({
       ID: p.id,
       Name: p.name,
       Category: p.category,
-      Price: p.price,
+      Price: `$${p.price}`,
       Stock: p.stock,
       Status: p.status
     }));
 
+    // 2. Prepare Sales Sheet
     const salesDataToExport = salesDateFilter ? filteredSales : salesLog;
+    const totalRevenue = salesDataToExport.reduce((sum, item) => sum + item.total, 0);
+    const totalItemsSold = salesDataToExport.reduce((sum, item) => sum + item.quantity, 0);
+    const reportDate = new Date().toLocaleString();
 
-    const salesData = salesDataToExport.map(s => ({
-      TransactionID: s.id,
-      Date: s.date,
-      Product: s.product,
-      Quantity: s.quantity,
-      TotalRevenue: s.total,
-      SoldBy: s.soldBy,        // New Column
-      ApprovedBy: s.approvedBy // New Column
-    }));
+    const salesSheetData = [
+      ["STOCKMASTER SALES REPORT"],
+      [`Generated: ${reportDate}`],
+      [`Filter Applied: ${salesDateFilter ? salesDateFilter : "All Time"}`],
+      [""],
+      ["PERFORMANCE SUMMARY"],
+      ["Total Revenue", "Total Items Sold", "Transactions Count"],
+      [`$${totalRevenue.toLocaleString()}`, totalItemsSold, salesDataToExport.length],
+      [""],
+      ["TRANSACTION DETAILS"],
+      ["ID", "Date", "Product", "Sold By", "Approved By", "Qty", "Revenue"] // Header Row
+    ];
+
+    salesDataToExport.forEach(s => {
+      salesSheetData.push([
+        s.id,
+        s.date,
+        s.product,
+        s.soldBy,
+        s.approvedBy,
+        s.quantity,
+        `$${s.total.toLocaleString()}`
+      ]);
+    });
 
     const wb = XLSX.utils.book_new();
     const wsInventory = XLSX.utils.json_to_sheet(inventoryData);
-    const wsSales = XLSX.utils.json_to_sheet(salesData);
+    const wsSales = XLSX.utils.aoa_to_sheet(salesSheetData); 
+
+    const wscols = [{ wch: 15 }, { wch: 25 }, { wch: 25 }, { wch: 20 }, { wch: 20 }, { wch: 10 }, { wch: 15 }];
+    wsSales['!cols'] = wscols;
 
     XLSX.utils.book_append_sheet(wb, wsInventory, "Inventory");
     XLSX.utils.book_append_sheet(wb, wsSales, "Sales Report");
-
     XLSX.writeFile(wb, "StockMaster_Report.xlsx");
-    Swal.fire({ icon: 'success', title: 'Report Downloaded', text: salesDateFilter ? 'Included filtered sales only.' : 'Included all sales records.', toast: true, position: 'top-end', timer: 3000, showConfirmButton: false });
+    
+    Swal.fire({ icon: 'success', title: 'Report Downloaded', text: 'Excel file generated with enhanced formatting.', toast: true, position: 'top-end', timer: 3000, showConfirmButton: false });
   };
 
-  // --- SETTINGS HANDLERS ---
+  // --- SETTINGS: PROFILE UPDATE ---
   const handleProfileUpdate = async (e) => {
     e.preventDefault();
-  
-    // Get logged-in user from localStorage
     const loggedUser = JSON.parse(localStorage.getItem("loggedInUser"));
     if (!loggedUser || !loggedUser.id) {
-      return Swal.fire('Error', 'User not found. Please login again.', 'error');
+       if(profile.email === "manager@stockmaster.com") { Swal.fire('Success', 'Profile updated (Mock)!', 'success'); return; }
+       return Swal.fire('Error', 'User not found.', 'error');
     }
-  
     try {
       const response = await fetch(`https://localhost:7262/api/auth/update-profile/${loggedUser.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fullName: profile.name,
-          email: profile.email
-        })
+        body: JSON.stringify({ fullName: profile.name, email: profile.email })
       });
-  
-      let data;
-      const contentType = response.headers.get("content-type");
-  
-      // Try to parse JSON if possible, otherwise read as text
-      if (contentType && contentType.includes("application/json")) {
-        data = await response.json();
-      } else {
-        data = { message: await response.text() };
-      }
-  
-      if (!response.ok) {
-        // Show the exact error from the backend
-        throw new Error(data?.message || "Failed to update profile");
-      }
-  
-      // Update local state and localStorage
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Failed");
+      
+      // Update State and Local Storage
       setProfile({ name: data.fullName, email: data.email, id: loggedUser.id });
-      localStorage.setItem(
-        "loggedInUser",
-        JSON.stringify({ ...loggedUser, name: data.fullName, email: data.email })
-      );
-  
-      Swal.fire('Success', 'Profile updated successfully!', 'success');
-    } catch (err) {
-      // Show the real backend error
-      Swal.fire('Error', err.message || 'Unknown error occurred', 'error');
-    }
+      localStorage.setItem("loggedInUser", JSON.stringify({ ...loggedUser, name: data.fullName, email: data.email }));
+      
+      Swal.fire('Success', 'Profile updated!', 'success');
+    } catch (err) { Swal.fire('Error', err.message, 'error'); }
   };
-  
-  
 
+  // --- SETTINGS: PASSWORD CHANGE ---
   const handlePasswordChange = async (e) => {
     e.preventDefault();
-    if (!passwords.current || !passwords.new || !passwords.confirm) {
-      return Swal.fire('Error', 'Please fill all password fields', 'error');
+    if (passwords.new !== passwords.confirm) return Swal.fire('Error', 'Passwords mismatch', 'error');
+    
+    const loggedUser = JSON.parse(localStorage.getItem("loggedInUser"));
+    if(!loggedUser?.id && profile.email === "manager@stockmaster.com") {
+        setPasswords({ current: "", new: "", confirm: "" });
+        return Swal.fire('Success', 'Password changed (Mock)!', 'success');
     }
-    if (passwords.new !== passwords.confirm) {
-      return Swal.fire('Error', 'New passwords do not match', 'error');
-    }
-  
-    const userId = JSON.parse(localStorage.getItem("loggedInUser"))?.id;
-    if (!userId) return Swal.fire('Error', 'User not found', 'error');
-  
+    
     try {
-      const response = await fetch(`https://localhost:7262/api/auth/change-password/${userId}`, {
+      const response = await fetch(`https://localhost:7262/api/auth/change-password/${loggedUser.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ currentPassword: passwords.current, newPassword: passwords.new })
       });
-  
-      if (!response.ok) {
-        const err = await response.json();
-        throw new Error(err.message || "Failed to change password");
-      }
-  
+      if (!response.ok) throw new Error("Failed to change password");
+      
       setPasswords({ current: "", new: "", confirm: "" });
-      Swal.fire('Success', 'Password changed successfully!', 'success');
-    } catch (err) {
-      Swal.fire('Error', err.message, 'error');
-    }
+      Swal.fire('Success', 'Password changed!', 'success');
+    } catch (err) { Swal.fire('Error', err.message, 'error'); }
   };
-  
 
   const handleLogout = () => {
-    Swal.fire({
-      title: 'Sign Out?', icon: 'question', showCancelButton: true, confirmButtonText: 'Log Out'
-    }).then((res) => {
-      if (res.isConfirmed) navigate('/login');
-    });
+    Swal.fire({ title: 'Sign Out?', icon: 'question', showCancelButton: true, confirmButtonText: 'Log Out' })
+      .then((res) => { if (res.isConfirmed) { localStorage.removeItem("loggedInUser"); navigate('/login'); } });
   };
 
+  // --- RENDER COMPONENT ---
   return (
     <div className="dashboard-container">
       {/* HEADER */}
@@ -398,15 +528,15 @@ export default function AdminStocks() {
                 <div className="stats-grid">
                   <div className="stat-card">
                     <div className="stat-icon-wrapper blue">📋</div>
-                    <div><div className="stat-label">Total Products</div><div className="stat-value">{products.length}</div></div>
+                    <div><div className="stat-label">Total Products</div><div className="stat-value">{isLoading ? "..." : products.length}</div></div>
                   </div>
                   <div className="stat-card">
                     <div className="stat-icon-wrapper red">⚠️</div>
-                    <div><div className="stat-label">Critical Stock</div><div className="stat-value">{lowStockCount}</div></div>
+                    <div><div className="stat-label">Critical Stock</div><div className="stat-value">{isLoading ? "..." : lowStockCount}</div></div>
                   </div>
                   <div className="stat-card">
                     <div className="stat-icon-wrapper green">💵</div>
-                    <div><div className="stat-label">Total Revenue</div><div className="stat-value">${totalRevenue.toLocaleString()}</div></div>
+                    <div><div className="stat-label">Total Revenue</div><div className="stat-value">{totalRevenue.toLocaleString()} Birr</div></div>
                   </div>
                 </div>
 
@@ -439,7 +569,9 @@ export default function AdminStocks() {
                           </tr>
                         </thead>
                         <tbody>
-                          {currentProducts.length > 0 ? (
+                          {isLoading ? (
+                             <tr><td colSpan="6" className="text-center" style={{padding:"20px"}}>Loading Data...</td></tr>
+                          ) : currentProducts.length > 0 ? (
                             currentProducts.map((p) => (
                               <tr key={p.id}>
                                 <td className="text-left font-weight-600">{p.name}</td>
@@ -456,7 +588,15 @@ export default function AdminStocks() {
                                   <span className={`status-badge ${p.status.toLowerCase().replace(/\s/g, '-')}`}>{p.status}</span>
                                 </td>
                                 <td className="text-right">
-                                  <button className="icon-btn delete" onClick={() => handleDelete(p.id)}>🗑️</button>
+                                  {/* EDIT AND DELETE BUTTONS */}
+                                  <div style={{display: 'flex', gap: '5px', justifyContent: 'flex-end'}}>
+                                    <button className="icon-btn edit" title="Edit" style={{backgroundColor: '#3b82f6', color:'white', padding:'4px 6px', borderRadius:'4px', border:'none', cursor:'pointer'}} onClick={() => handleEditProduct(p)}>
+                                        ✏️
+                                    </button>
+                                    <button className="icon-btn delete" title="Delete" onClick={() => handleDelete(p.id)}>
+                                        🗑️
+                                    </button>
+                                  </div>
                                 </td>
                               </tr>
                             ))
@@ -470,29 +610,11 @@ export default function AdminStocks() {
                     {/* Pagination for Inventory */}
                     {totalInventoryPages > 1 && (
                       <div className="pagination-container">
-                        <button
-                          className="page-btn nav"
-                          onClick={() => paginateInventory(inventoryPage - 1)}
-                          disabled={inventoryPage === 1}
-                        >
-                          &lt;
-                        </button>
+                        <button className="page-btn nav" onClick={() => paginateInventory(inventoryPage - 1)} disabled={inventoryPage === 1}>&lt;</button>
                         {[...Array(totalInventoryPages)].map((_, i) => (
-                          <button
-                            key={i}
-                            className={`page-btn ${inventoryPage === i + 1 ? 'active' : ''}`}
-                            onClick={() => paginateInventory(i + 1)}
-                          >
-                            {i + 1}
-                          </button>
+                          <button key={i} className={`page-btn ${inventoryPage === i + 1 ? 'active' : ''}`} onClick={() => paginateInventory(i + 1)}>{i + 1}</button>
                         ))}
-                        <button
-                          className="page-btn nav"
-                          onClick={() => paginateInventory(inventoryPage + 1)}
-                          disabled={inventoryPage === totalInventoryPages}
-                        >
-                          &gt;
-                        </button>
+                        <button className="page-btn nav" onClick={() => paginateInventory(inventoryPage + 1)} disabled={inventoryPage === totalInventoryPages}>&gt;</button>
                       </div>
                     )}
                   </div>
@@ -509,14 +631,7 @@ export default function AdminStocks() {
                     <p className="subtitle">Track every transaction made from the inventory.</p>
                   </div>
                   <div className="header-actions" style={{ display: 'flex', gap: '10px' }}>
-                    {/* Date Filter Input */}
-                    <input
-                      type="date"
-                      className="form-input"
-                      style={{ width: 'auto', padding: '8px 12px' }}
-                      value={salesDateFilter}
-                      onChange={(e) => { setSalesDateFilter(e.target.value); setSalesPage(1); }}
-                    />
+                    <input type="date" className="form-input" style={{ width: 'auto', padding: '8px 12px' }} value={salesDateFilter} onChange={(e) => { setSalesDateFilter(e.target.value); setSalesPage(1); }} />
                     <button className="secondary-btn" onClick={handleDownloadExcel}>⬇ Download Report</button>
                   </div>
                 </div>
@@ -525,7 +640,7 @@ export default function AdminStocks() {
                   <div className="card-header-simple" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <h3>{salesDateFilter ? `Transactions on ${salesDateFilter}` : 'All Transactions'}</h3>
                     <div className="stat-value text-success" style={{ fontSize: '1rem' }}>
-                      Revenue: ${filteredSales.reduce((a, b) => a + b.total, 0).toLocaleString()}
+                      Revenue:  {filteredSales.reduce((a, b) => a + b.total, 0).toLocaleString()} Birr
                     </div>
                   </div>
                   <div className="card-body">
@@ -550,11 +665,11 @@ export default function AdminStocks() {
                                 <td className="text-center">{sale.soldBy || "-"}</td>
                                 <td className="text-center"><span style={{ background: '#f1f5f9', padding: '2px 8px', borderRadius: '4px', fontSize: '0.8rem' }}>{sale.approvedBy}</span></td>
                                 <td className="text-center">{sale.quantity}</td>
-                                <td className="text-right text-success font-weight-bold">+${sale.total.toLocaleString()}</td>
+                                <td className="text-right text-success font-weight-bold">{sale.total.toLocaleString()} Birr</td>
                               </tr>
                             ))
                           ) : (
-                            <tr><td colSpan="6" className="text-center">No transactions found {salesDateFilter && 'for this date'}.</td></tr>
+                            <tr><td colSpan="6" className="text-center">No transactions found.</td></tr>
                           )}
                         </tbody>
                       </table>
@@ -563,32 +678,13 @@ export default function AdminStocks() {
                     {/* Pagination for Sales */}
                     {totalSalesPages > 1 && (
                       <div className="pagination-container">
-                        <button
-                          className="page-btn nav"
-                          onClick={() => paginateSales(salesPage - 1)}
-                          disabled={salesPage === 1}
-                        >
-                          &lt;
-                        </button>
+                        <button className="page-btn nav" onClick={() => paginateSales(salesPage - 1)} disabled={salesPage === 1}>&lt;</button>
                         {[...Array(totalSalesPages)].map((_, i) => (
-                          <button
-                            key={i}
-                            className={`page-btn ${salesPage === i + 1 ? 'active' : ''}`}
-                            onClick={() => paginateSales(i + 1)}
-                          >
-                            {i + 1}
-                          </button>
+                          <button key={i} className={`page-btn ${salesPage === i + 1 ? 'active' : ''}`} onClick={() => paginateSales(i + 1)}>{i + 1}</button>
                         ))}
-                        <button
-                          className="page-btn nav"
-                          onClick={() => paginateSales(salesPage + 1)}
-                          disabled={salesPage === totalSalesPages}
-                        >
-                          &gt;
-                        </button>
+                        <button className="page-btn nav" onClick={() => paginateSales(salesPage + 1)} disabled={salesPage === totalSalesPages}>&gt;</button>
                       </div>
                     )}
-
                   </div>
                 </div>
               </div>
@@ -599,7 +695,6 @@ export default function AdminStocks() {
               <div className="fade-in">
                 <h2 className="mb-20">Account Settings</h2>
                 <div className="settings-grid-layout">
-
                   {/* Profile Form */}
                   <div className="admin-card">
                     <div className="card-header-simple"><h3>Profile Information</h3></div>
@@ -607,21 +702,11 @@ export default function AdminStocks() {
                       <div className="card-body">
                         <div className="form-group">
                           <label>Full Name</label>
-                          <input
-                            type="text"
-                            className="form-input"
-                            value={profile.name}
-                            onChange={(e) => setProfile({ ...profile, name: e.target.value })}
-                          />
+                          <input type="text" className="form-input" value={profile.name} onChange={(e) => setProfile({ ...profile, name: e.target.value })} />
                         </div>
                         <div className="form-group">
                           <label>Email Address</label>
-                          <input
-                            type="email"
-                            className="form-input"
-                            value={profile.email}
-                            onChange={(e) => setProfile({ ...profile, email: e.target.value })}
-                          />
+                          <input type="email" className="form-input" value={profile.email} onChange={(e) => setProfile({ ...profile, email: e.target.value })} />
                         </div>
                       </div>
                       <div className="card-footer">
@@ -629,7 +714,6 @@ export default function AdminStocks() {
                       </div>
                     </form>
                   </div>
-
                   {/* Password Form */}
                   <div className="admin-card">
                     <div className="card-header-simple"><h3>Change Password</h3></div>
@@ -637,31 +721,15 @@ export default function AdminStocks() {
                       <div className="card-body">
                         <div className="form-group">
                           <label>Current Password</label>
-                          <input
-                            type="password"
-                            className="form-input"
-                            value={passwords.current}
-                            onChange={(e) => setPasswords({ ...passwords, current: e.target.value })}
-                          />
+                          <input type="password" className="form-input" value={passwords.current} onChange={(e) => setPasswords({ ...passwords, current: e.target.value })} />
                         </div>
                         <div className="form-group">
                           <label>New Password</label>
-                          <input
-                            type="password"
-                            className="form-input"
-                            placeholder="Min 6 characters"
-                            value={passwords.new}
-                            onChange={(e) => setPasswords({ ...passwords, new: e.target.value })}
-                          />
+                          <input type="password" className="form-input" placeholder="Min 6 characters" value={passwords.new} onChange={(e) => setPasswords({ ...passwords, new: e.target.value })} />
                         </div>
                         <div className="form-group">
                           <label>Confirm Password</label>
-                          <input
-                            type="password"
-                            className="form-input"
-                            value={passwords.confirm}
-                            onChange={(e) => setPasswords({ ...passwords, confirm: e.target.value })}
-                          />
+                          <input type="password" className="form-input" value={passwords.confirm} onChange={(e) => setPasswords({ ...passwords, confirm: e.target.value })} />
                         </div>
                       </div>
                       <div className="card-footer">
@@ -669,7 +737,6 @@ export default function AdminStocks() {
                       </div>
                     </form>
                   </div>
-
                 </div>
               </div>
             )}

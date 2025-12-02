@@ -771,7 +771,7 @@ export default function AdminStocks() {
                               <tr key={p.id}>
                                 <td className="text-left font-weight-600">{p.name}</td>
                                 <td className="text-center"><span className="category-tag">{p.category}</span></td>
-                                <td className="text-center">${p.price}</td>
+                                <td className="text-center">{p.price} Birr</td>
                                 <td className="text-center">
                                   <div className="stock-control">
                                     <button className="stock-btn minus" onClick={() => handleStockAdjustment(p, 'sell')}>-</button>

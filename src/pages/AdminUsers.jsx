@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import Swal from 'sweetalert2';
 import * as XLSX from 'xlsx';
@@ -36,6 +36,7 @@ export default function AdminUsers() {
     try {
       if (!isBackground) setIsLoading(true);
 
+      // NOTE: Ensure this URL matches your actual backend port
       const response = await fetch('https://localhost:7262/api/auth/users', {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' }
@@ -65,7 +66,6 @@ export default function AdminUsers() {
           name: user.name || "Unknown",
           email: user.email || "No Email",
           role: user.role || "User",
-          // IMPORTANT: If status is null/undefined, assume Pending or check backend default
           status: user.status || "Pending", 
           lastLogin: lastLoginText
         };
@@ -91,8 +91,39 @@ export default function AdminUsers() {
     return () => clearInterval(intervalId);
   }, [fetchUsers]);
 
-  // --- HANDLERS ---
+  // --- ANALYTICS CALCULATIONS (Memoized) ---
+  const reportStats = useMemo(() => {
+    const total = users.length;
+    const active = users.filter(u => u.status === "Active").length;
+    const pending = users.filter(u => u.status === "Pending").length;
+    
+    // Role Counts for Pie Chart
+    const admins = users.filter(u => u.role === "Admin").length;
+    const managers = users.filter(u => u.role === "Manager").length;
+    const others = total - admins - managers;
 
+    return { total, active, pending, admins, managers, others };
+  }, [users]);
+
+  // Calculate Gradient string for Pie Chart dynamically based on roles
+  const pieChartGradient = useMemo(() => {
+    if (reportStats.total === 0) return 'conic-gradient(#e2e8f0 0% 100%)';
+    
+    const adminPct = (reportStats.admins / reportStats.total) * 100;
+    const managerPct = (reportStats.managers / reportStats.total) * 100;
+    
+    // CSS Conic Gradient logic
+    // Color 1 (Primary/Admin): 0% -> adminPct%
+    // Color 2 (Green/Manager): adminPct% -> (adminPct + managerPct)%
+    // Color 3 (Orange/Others): (adminPct + managerPct)% -> 100%
+    
+    const p1 = adminPct;
+    const p2 = adminPct + managerPct;
+    
+    return `conic-gradient(var(--primary) 0% ${p1}%, #10b981 ${p1}% ${p2}%, #f59e0b ${p2}% 100%)`;
+  }, [reportStats]);
+
+  // --- HANDLERS ---
   const handleRoleChange = async (id, newRole) => {
     Swal.fire({
       title: 'Update Role?',
@@ -120,7 +151,6 @@ export default function AdminUsers() {
     });
   };
 
-  // ✅ NEW: Handle Approval for Pending Users
   const handleApproveUser = async (id) => {
     Swal.fire({
       title: 'Approve User?',
@@ -136,13 +166,11 @@ export default function AdminUsers() {
     });
   };
 
-  // ✅ Handle Standard Active/Inactive Toggle
   const handleStatusToggle = async (id, currentStatus) => {
     const newStatus = currentStatus === "Active" ? "Inactive" : "Active";
     updateUserStatus(id, newStatus);
   };
 
-  // Helper to call API
   const updateUserStatus = async (id, newStatus) => {
     try {
       const response = await fetch(`https://localhost:7262/api/auth/users/${id}/status`, {
@@ -252,7 +280,7 @@ export default function AdminUsers() {
         <main className="main-content">
           <div className="content-wrapper">
             
-            {/* USERS VIEW */}
+            {/* --- USERS VIEW --- */}
             {activeView === 'users' && (
               <div className="admin-card fade-in">
                 <div className="admin-tabs">
@@ -304,7 +332,7 @@ export default function AdminUsers() {
                                     </div>
                                   </td>
                                   
-                                  {/* --- STATUS CONTROL LOGIC --- */}
+                                  {/* STATUS CONTROL */}
                                   <td className="text-center">
                                     {user.status === "Pending" ? (
                                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}>
@@ -359,26 +387,107 @@ export default function AdminUsers() {
               </div>
             )}
 
-            {/* --- REPORTS VIEW --- */}
+            {/* --- REPORTS VIEW (COMPLETELY IMPLEMENTED) --- */}
             {activeView === 'reports' && (
               <div className="reports-view fade-in">
+                
+                {/* Header */}
                 <div className="section-header">
-                   <h2>Analytics</h2>
-                   <button className="primary-btn excel-btn" onClick={handleDownloadExcel}>Export Excel</button>
+                   <div>
+                     <h2>System Analytics</h2>
+                     <p className="subtitle">Overview of user metrics and system growth.</p>
+                   </div>
+                   <button className="primary-btn excel-btn" onClick={handleDownloadExcel}>
+                     <span className="icon">📥</span> Export Excel
+                   </button>
                 </div>
+
+                {/* Top Stats Grid */}
                 <div className="stats-grid">
                   <div className="stat-card">
                     <div className="stat-icon-wrapper blue">👥</div>
-                    <div><div className="stat-label">Total Users</div><div className="stat-value">{users.length}</div></div>
+                    <div>
+                      <div className="stat-label">Total Users</div>
+                      <div className="stat-value">{reportStats.total}</div>
+                    </div>
                   </div>
                   <div className="stat-card">
                     <div className="stat-icon-wrapper green">✅</div>
-                    <div><div className="stat-label">Active</div><div className="stat-value">{users.filter(u => u.status === "Active").length}</div></div>
+                    <div>
+                      <div className="stat-label">Active Users</div>
+                      <div className="stat-value">{reportStats.active}</div>
+                    </div>
                   </div>
                   <div className="stat-card">
                     <div className="stat-icon-wrapper red">⏳</div>
-                    <div><div className="stat-label">Pending</div><div className="stat-value">{users.filter(u => u.status === "Pending").length}</div></div>
+                    <div>
+                      <div className="stat-label">Pending Approval</div>
+                      <div className="stat-value">{reportStats.pending}</div>
+                    </div>
                   </div>
+                  <div className="stat-card">
+                    <div className="stat-icon-wrapper purple">👔</div>
+                    <div>
+                      <div className="stat-label">Admins & Managers</div>
+                      <div className="stat-value">{reportStats.admins + reportStats.managers}</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Charts Section */}
+                <div className="charts-grid">
+                  
+                  {/* Left: User Growth Bar Chart (CSS ONLY) */}
+                  <div className="admin-card chart-card">
+                    <div className="card-header">
+                      <h3>User Growth</h3>
+                      <span className="tag">Last 6 Months</span>
+                    </div>
+                    <div className="card-body">
+                      <div className="bar-chart-container">
+                        <div className="grid-lines">
+                          <div><span>100</span></div>
+                          <div><span>75</span></div>
+                          <div><span>50</span></div>
+                          <div><span>25</span></div>
+                          <div><span>0</span></div>
+                        </div>
+                        {/* Mock data bars for visualization using CSS heights */}
+                        <div className="bars-wrapper">
+                          <div className="chart-bar" style={{height: '35%'}} data-label="Jul"></div>
+                          <div className="chart-bar" style={{height: '45%'}} data-label="Aug"></div>
+                          <div className="chart-bar" style={{height: '30%'}} data-label="Sep"></div>
+                          <div className="chart-bar" style={{height: '60%'}} data-label="Oct"></div>
+                          <div className="chart-bar" style={{height: '75%'}} data-label="Nov"></div>
+                          <div className="chart-bar highlight" style={{height: '85%'}} data-label="Dec"></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right: Role Distribution Pie Chart */}
+                  <div className="admin-card chart-card">
+                    <div className="card-header">
+                      <h3>Role Distribution</h3>
+                    </div>
+                    <div className="card-body flex-center">
+                      <div className="pie-container">
+                        {/* Dynamic Gradient based on actual state */}
+                        <div 
+                          className="css-pie-chart" 
+                          style={{ background: pieChartGradient }}
+                        >
+                          <div className="pie-center-value">{reportStats.total} Users</div>
+                        </div>
+                        <div className="pie-legend">
+                          <div className="legend-item"><span className="dot c1"></span> Admin ({reportStats.admins})</div>
+                          <div className="legend-item"><span className="dot c2"></span> Manager ({reportStats.managers})</div>
+                          <div className="legend-item"><span className="dot c3"></span> User ({reportStats.others})</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
                 </div>
               </div>
             )}

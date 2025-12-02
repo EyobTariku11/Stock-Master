@@ -245,16 +245,48 @@
   background-size: cover;
   background-position: center;
 }
-
 .image-overlay {
   position: absolute;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: linear-gradient(135deg, rgba(79, 70, 229, 0.9), rgba(129, 140, 248, 0.7));
+  top: 0; 
+  left: 0; 
+  right: 0; 
+  bottom: 0;
+
+  /* Minimal, modern dark gradient */
+  background: linear-gradient(
+    to top,
+    rgba(0, 0, 0, 0.6) 0%,   /* dark at bottom for text contrast */
+    rgba(0, 0, 0, 0.1) 70%   /* subtle transparency at top */
+  );
+
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
-  padding: 60px;
-  color: var(--white);
+
+  /* Clean spacing */
+  padding: 60px 50px;
+  gap: 12px;
+
+  color: #fff;  /* bright, readable text */
+  text-align: left;
+
+  /* Smooth appearance */
+  border-radius: 0 20px 20px 0;
+}
+
+/* Styling the text inside overlay */
+.image-overlay h3 {
+  font-size: 2rem;
+  font-weight: 700;
+  margin: 0;
+  line-height: 1.2;
+}
+
+.image-overlay p {
+  font-size: 1rem;
+  opacity: 0.85;
+  line-height: 1.4;
+  margin: 0;
 }
 
 .overlay-text h3 {

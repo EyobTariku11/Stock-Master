@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
+import Swal from 'sweetalert2'; // Import SweetAlert2
 import '../../css/Signup.css';
 
 export default function Signup() {
@@ -74,7 +75,18 @@ export default function Signup() {
       }
 
       console.log("User created:", data);
-      navigate("/Login");
+
+      // ✅ CHANGE: Show SweetAlert Confirmation
+      Swal.fire({
+        icon: 'success',
+        title: 'Registration Successful!',
+        text: 'Your account has been created and is currently Pending Approval by an admin.',
+        confirmButtonColor: '#4f46e5',
+        confirmButtonText: 'Go to Login'
+      }).then(() => {
+        // Redirect to Login after user closes the alert
+        navigate("/Login");
+      });
 
     } catch (err) {
       console.error("Signup fetch error:", err);

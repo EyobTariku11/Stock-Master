@@ -11,11 +11,30 @@ export default function AdminStocks() {
   const [activeView, setActiveView] = useState("inventory");
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth > 900);
   const [searchTerm, setSearchTerm] = useState("");
+  
+  // Date Filters
   const [salesDateFilter, setSalesDateFilter] = useState("");
+  const [creditDateFilter, setCreditDateFilter] = useState(""); 
+
+  // Credit View Mode (Active vs Overdue)
+  const [creditViewMode, setCreditViewMode] = useState("active"); // 'active' or 'overdue'
+
+  // Notification State with Persistence
+  const [acknowledgedIds, setAcknowledgedIds] = useState(() => {
+    // Load acknowledged alerts from LocalStorage on initial render
+    const saved = localStorage.getItem("acknowledgedAlerts");
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  // Save to LocalStorage whenever acknowledgedIds changes
+  useEffect(() => {
+    localStorage.setItem("acknowledgedAlerts", JSON.stringify(acknowledgedIds));
+  }, [acknowledgedIds]);
 
   // Pagination State
   const [inventoryPage, setInventoryPage] = useState(1);
   const [salesPage, setSalesPage] = useState(1);
+  const [creditPage, setCreditPage] = useState(1); 
   const itemsPerPage = 5;
 
   // Profile State
@@ -30,7 +49,7 @@ export default function AdminStocks() {
 
   // --- DATA STATE ---
   const [products, setProducts] = useState([]); 
-  const [salesLog, setSalesLog] = useState([]); // Fetched from API
+  const [salesLog, setSalesLog] = useState([]); 
   const [isLoading, setIsLoading] = useState(true);
 
   // --- 1. FETCH DATA (Products & Sales) ---
@@ -47,7 +66,6 @@ export default function AdminStocks() {
       
       const data = await res.json();
       
-      // Map API data (PascalCase) to UI data (camelCase)
       const formattedProducts = data.map(p => ({
         id: p.id || p.Id,
         name: p.name || p.Name,
@@ -79,16 +97,39 @@ export default function AdminStocks() {
       if (!res.ok) return;
       const data = await res.json();
       
-      const formattedSales = data.map(s => ({
-        id: s.id || s.Id,
-        product: s.productName || s.ProductName,
-        quantity: s.quantity || s.Quantity,
-        total: s.totalPrice || s.TotalPrice,
-        date: new Date(s.dateSold || s.DateSold).toLocaleString(),
-        rawDate: s.dateSold || s.DateSold, // For filtering
-        soldBy: s.soldBy || s.SoldBy,
-        approvedBy: s.approvedBy || s.ApprovedBy
-      }));
+      const today = new Date();
+      today.setHours(0, 0, 0, 0); // Normalize today to midnight
+
+      const formattedSales = data.map(s => {
+        // Calculate Days Remaining Logic
+        let daysRem = null;
+        if (s.creditDueDate || s.CreditDueDate) {
+            const due = new Date(s.creditDueDate || s.CreditDueDate);
+            due.setHours(0, 0, 0, 0);
+            const diffTime = due - today;
+            daysRem = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        }
+
+        return {
+          id: s.id || s.Id,
+          product: s.productName || s.ProductName,
+          quantity: s.quantity || s.Quantity,
+          total: s.totalPrice || s.TotalPrice,
+          // Transaction Date
+          date: new Date(s.dateSold || s.DateSold).toLocaleString(),
+          rawDate: s.dateSold || s.DateSold, 
+          soldBy: s.soldBy || s.SoldBy,
+          approvedBy: s.approvedBy || s.ApprovedBy, 
+          // Credit Specifics
+          salesType: s.salesType || s.SalesType || "Cash", 
+          customerName: s.customerName || s.CustomerName || "-",
+          // Map CreditDueDate from API
+          creditDueDate: (s.creditDueDate || s.CreditDueDate) 
+              ? new Date(s.creditDueDate || s.CreditDueDate).toLocaleDateString() 
+              : "-",
+          daysRemaining: daysRem
+        };
+      });
       setSalesLog(formattedSales);
     } catch (err) {
       console.error("Sales fetch error", err);
@@ -143,8 +184,92 @@ export default function AdminStocks() {
   const indexOfFirstSale = indexOfLastSale - itemsPerPage;
   const currentSales = filteredSales.slice(indexOfFirstSale, indexOfLastSale);
 
+  // === CREDIT SALES LOGIC (Split into Active & Overdue) ===
+  const allCreditSales = salesLog.filter(s => {
+      const isCredit = s.salesType === 'Credit';
+      const matchesDate = creditDateFilter ? s.rawDate.startsWith(creditDateFilter) : true;
+      return isCredit && matchesDate;
+  });
+
+  // Filter 1: Active Credits (Days Remaining > 0)
+  const activeCreditSales = allCreditSales.filter(s => s.daysRemaining !== null && s.daysRemaining > 0);
+  
+  // Filter 2: Overdue Credits (Days Remaining <= 0)
+  const overdueCreditSales = allCreditSales.filter(s => s.daysRemaining !== null && s.daysRemaining <= 0);
+
+  // Determine which list to show based on Toggle State
+  const displayedCreditSales = creditViewMode === 'active' ? activeCreditSales : overdueCreditSales;
+
+  // Pagination for Credits
+  const totalCreditPages = Math.ceil(displayedCreditSales.length / itemsPerPage);
+  const indexOfLastCredit = creditPage * itemsPerPage;
+  const indexOfFirstCredit = indexOfLastCredit - itemsPerPage;
+  const currentCreditSales = displayedCreditSales.slice(indexOfFirstCredit, indexOfLastCredit);
+
+  // === NOTIFICATION LOGIC ===
+  // Only alert for active items (not yet overdue) that are near due (<=3 days)
+  // AND NOT in the acknowledged list
+  const nearDueItems = activeCreditSales.filter(s => 
+      s.daysRemaining <= 3 && 
+      !acknowledgedIds.includes(s.id)
+  );
+  const nearDueCount = nearDueItems.length;
+
+  // --- NOTIFICATION CLICK HANDLER ---
+  const handleNotificationClick = () => {
+    if (nearDueCount === 0) {
+        Swal.fire({
+            title: 'No New Alerts',
+            text: 'There are no active credit payments due in the next 3 days that require attention.',
+            icon: 'info',
+            confirmButtonColor: '#3b82f6'
+        });
+        return;
+    }
+
+    const listHtml = nearDueItems.map(item => `
+        <div style="text-align: left; margin-bottom: 12px; border-bottom: 1px solid #eee; padding-bottom: 8px;">
+           <div style="font-weight: bold; color: #1f2937; font-size: 1.1rem;">${item.customerName}</div>
+           <div style="display: flex; justify-content: space-between; font-size: 0.9rem; color: #6b7280; margin-top: 4px;">
+              <span>Product: ${item.product}</span>
+              <span>Amt: <strong>${item.total} Birr</strong></span>
+           </div>
+           <div style="margin-top: 5px; color: #d97706; font-weight: 600; font-size: 0.9rem;">
+              ⚠️ Due in ${item.daysRemaining} days
+           </div>
+        </div>
+    `).join('');
+
+    Swal.fire({
+        title: '<strong>Upcoming Payments</strong>',
+        html: `<div style="max-height: 300px; overflow-y: auto; padding-right: 5px;">${listHtml}</div>`,
+        icon: 'warning',
+        showCloseButton: true,
+        focusConfirm: false,
+        confirmButtonText: 'Acknowledged',
+        confirmButtonColor: '#3b82f6'
+    }).then((result) => {
+        if (result.isConfirmed) {
+            // Add IDs to ignored list so they don't appear again
+            const idsToIgnore = nearDueItems.map(i => i.id);
+            setAcknowledgedIds(prev => [...prev, ...idsToIgnore]);
+            
+            Swal.fire({
+                icon: 'success',
+                title: 'Alerts Cleared',
+                text: 'These alerts will not appear again.',
+                toast: true,
+                position: 'top-end',
+                timer: 2000,
+                showConfirmButton: false
+            });
+        }
+    });
+  };
+
   const paginateInventory = (pageNumber) => setInventoryPage(pageNumber);
   const paginateSales = (pageNumber) => setSalesPage(pageNumber);
+  const paginateCredit = (pageNumber) => setCreditPage(pageNumber);
 
   // --- 2. ADD PRODUCT (POST API) ---
   const handleAddProduct = async () => {
@@ -159,31 +284,34 @@ export default function AdminStocks() {
       showCancelButton: true,
       confirmButtonText: 'Add Product',
       confirmButtonColor: '#4f46e5',
-      preConfirm: () => [
-        document.getElementById('swal-name').value,
-        document.getElementById('swal-cat').value,
-        document.getElementById('swal-price').value,
-        document.getElementById('swal-stock').value
-      ]
+      preConfirm: () => {
+        const name = document.getElementById('swal-name').value;
+        const cat = document.getElementById('swal-cat').value;
+        const price = document.getElementById('swal-price').value;
+        const stock = document.getElementById('swal-stock').value;
+
+        if (!name || !price || !stock) {
+            Swal.showValidationMessage('Please fill all fields');
+            return false;
+        }
+        return [name, cat, price, stock];
+      }
     });
 
     if (formValues) {
       const [name, cat, price, stock] = formValues;
-      if (!name || !price || !stock) return Swal.fire('Error', 'Please fill all fields', 'error');
-
-      const payload = {
-        Name: name,
-        Category: cat || "Uncategorized",
-        Price: parseFloat(price),
-        Stock: parseInt(stock),
-        MinStock: 10
-      };
 
       try {
         const res = await fetch("https://localhost:7262/api/products", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
+          body: JSON.stringify({
+            Name: name,
+            Category: cat || "Uncategorized",
+            Price: parseFloat(price),
+            Stock: parseInt(stock),
+            MinStock: 10
+          })
         });
 
         if (!res.ok) throw new Error("Failed to add product");
@@ -202,17 +330,10 @@ export default function AdminStocks() {
     const { value: formValues } = await Swal.fire({
       title: 'Edit Product',
       html:
-        `<div style="text-align:left; margin-bottom:5px; font-size:0.9rem;">Product Name</div>` +
-        `<input id="swal-edit-name" class="swal2-input" value="${product.name}" style="margin-top:0;">` +
-        
-        `<div style="text-align:left; margin-bottom:5px; margin-top:10px; font-size:0.9rem;">Category</div>` +
-        `<input id="swal-edit-cat" class="swal2-input" value="${product.category}" style="margin-top:0;">` +
-        
-        `<div style="text-align:left; margin-bottom:5px; margin-top:10px; font-size:0.9rem;">Price ($)</div>` +
-        `<input id="swal-edit-price" type="number" class="swal2-input" value="${product.price}" style="margin-top:0;">` +
-        
-        `<div style="text-align:left; margin-bottom:5px; margin-top:10px; font-size:0.9rem;">Min Stock Alert Level</div>` +
-        `<input id="swal-edit-min" type="number" class="swal2-input" value="${product.minStock}" style="margin-top:0;">`,
+        `<input id="swal-edit-name" class="swal2-input" value="${product.name}" placeholder="Name">` +
+        `<input id="swal-edit-cat" class="swal2-input" value="${product.category}" placeholder="Category">` +
+        `<input id="swal-edit-price" type="number" class="swal2-input" value="${product.price}" placeholder="Price">` +
+        `<input id="swal-edit-min" type="number" class="swal2-input" value="${product.minStock}" placeholder="Min Stock">`,
       focusConfirm: false,
       showCancelButton: true,
       confirmButtonText: 'Save Changes',
@@ -227,11 +348,7 @@ export default function AdminStocks() {
 
     if (formValues) {
       const [name, cat, price, minStock] = formValues;
-      
-      if (!name || !price) return Swal.fire('Error', 'Name and Price are required', 'error');
-
       try {
-        // Call the new "details" endpoint
         const res = await fetch(`https://localhost:7262/api/products/details/${product.id}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -243,11 +360,9 @@ export default function AdminStocks() {
           })
         });
 
-        if (!res.ok) throw new Error("Failed to update product details");
-
-        fetchProducts(); // Refresh list
+        if (!res.ok) throw new Error("Failed to update details");
+        fetchProducts();
         Swal.fire('Updated!', 'Product details saved.', 'success');
-
       } catch (err) {
         Swal.fire('Error', err.message, 'error');
       }
@@ -257,32 +372,130 @@ export default function AdminStocks() {
   // --- 3. STOCK ADJUSTMENT (Sell or Restock) ---
   const handleStockAdjustment = async (product, type) => {
     const isSale = type === 'sell';
-    let quantity, soldBy;
 
-    // UI Input Logic
     if (isSale) {
+      const todayStr = new Date().toISOString().split('T')[0];
+
       const { value: formValues } = await Swal.fire({
-        title: `Sell ${product.name}`,
+        title: `<div class="modern-swal-title">New Transaction</div>`,
         html: `
-            <div style="text-align:left; font-size:0.9rem; font-weight:600; margin-bottom:5px; color:#64748b;">Quantity Sold (Max: ${product.stock})</div>
-            <input id="swal-qty" type="number" class="swal2-input" placeholder="Enter quantity" style="margin-top:0;">
-            <div style="text-align:left; font-size:0.9rem; font-weight:600; margin-bottom:5px; margin-top:15px; color:#64748b;">Sold By</div>
-            <input id="swal-salesperson" type="text" class="swal2-input" value="${profile.name}" style="margin-top:0;">
+          <div class="modern-form-wrapper">
+             <div class="product-info-banner">
+                <span>${product.name}</span>
+                <span class="badge">In Stock: ${product.stock}</span>
+             </div>
+
+             <div class="form-grid">
+                <div class="form-group">
+                   <label>Quantity</label>
+                   <input id="swal-qty" type="number" class="swal-modern-input" placeholder="0" max="${product.stock}">
+                </div>
+                <div class="form-group">
+                   <label>Payment Type</label>
+                   <select id="swal-type" class="swal-modern-input">
+                     <option value="Cash">Cash</option>
+                     <option value="Credit">Credit</option>
+                   </select>
+                </div>
+                
+                <div class="form-group full-width">
+                   <label>Customer Name</label>
+                   <input id="swal-customer" type="text" class="swal-modern-input" placeholder="Customer Name">
+                </div>
+                
+                <div class="form-group">
+                   <label>Due Date (Future Only)</label>
+                   <input id="swal-credit-date" type="date" class="swal-modern-input" min="${todayStr}" disabled>
+                </div>
+                
+                <div class="form-group">
+                   <label>Salesperson</label>
+                   <input id="swal-salesperson" type="text" class="swal-modern-input" value="${profile.name}">
+                </div>
+             </div>
+          </div>
         `,
+        customClass: {
+            popup: 'modern-swal-popup'
+        },
         focusConfirm: false,
         showCancelButton: true,
-        confirmButtonColor: '#ef4444',
-        confirmButtonText: 'Confirm Sale',
+        confirmButtonColor: '#4f46e5',
+        confirmButtonText: 'Complete Sale',
+        
+        didOpen: () => {
+            const popup = Swal.getPopup();
+            const typeSelect = popup.querySelector('#swal-type');
+            const dateInput = popup.querySelector('#swal-credit-date');
+
+            typeSelect.addEventListener('change', () => {
+                const isCredit = typeSelect.value === 'Credit';
+                if (isCredit) {
+                    dateInput.disabled = false;
+                } else {
+                    dateInput.disabled = true;
+                    dateInput.value = ''; 
+                }
+            });
+        },
+
         preConfirm: () => {
-          const q = document.getElementById('swal-qty').value;
-          const s = document.getElementById('swal-salesperson').value;
-          if (!q || q <= 0 || parseInt(q) > product.stock) return Swal.showValidationMessage('Invalid quantity');
-          if (!s) return Swal.showValidationMessage('Please enter salesperson name');
-          return [q, s];
+          const qty = parseInt(document.getElementById('swal-qty').value);
+          const type = document.getElementById('swal-type').value;
+          const customer = document.getElementById('swal-customer').value;
+          const creditDate = document.getElementById('swal-credit-date').value;
+          const soldBy = document.getElementById('swal-salesperson').value;
+    
+          if (!qty || qty <= 0) return Swal.showValidationMessage('Invalid quantity');
+          if (qty > product.stock) return Swal.showValidationMessage(`Insufficient stock. Only ${product.stock} available.`);
+    
+          if (type === 'Credit') {
+              if (!customer) return Swal.showValidationMessage('Customer name required for credit sale');
+              if (!creditDate) return Swal.showValidationMessage('Due date required for credit sale');
+          }
+    
+          return { qty, type, customer, creditDate, soldBy };
         }
       });
-      if (formValues) { quantity = parseInt(formValues[0]); soldBy = formValues[1]; }
+    
+      if (formValues) {
+        try {
+          const salePayload = {
+            ProductId: product.id,
+            Quantity: formValues.qty,
+            SoldBy: formValues.soldBy,
+            ApprovedBy: profile.name,
+            SalesType: formValues.type,
+            CustomerName: formValues.customer || null,
+            CreditSaleDate: (formValues.type === 'Credit' && formValues.creditDate) ? formValues.creditDate : null 
+          };
+    
+          const res = await fetch("https://localhost:7262/api/sales", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(salePayload)
+          });
+          
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.message || "Sale failed");
+          
+          Swal.fire({
+            icon: 'success',
+            title: 'Sale Successful',
+            text: `Revenue: $${(formValues.qty * product.price).toLocaleString()}`,
+            timer: 2000,
+            showConfirmButton: false
+          });
+          
+          fetchProducts();
+          fetchSales();
+        } catch (err) {
+          Swal.fire('Error', err.message, 'error');
+        }
+      }
+
     } else {
+      // === CASE 2: RESTOCKING ===
       const { value } = await Swal.fire({
         title: `Restock ${product.name}`,
         input: 'number',
@@ -291,61 +504,34 @@ export default function AdminStocks() {
         confirmButtonText: 'Add Stock',
         inputValidator: (value) => { if (!value || value <= 0) return 'Invalid number!'; }
       });
-      if (value) quantity = parseInt(value);
-    }
-
-    // API Execution Logic
-    if (quantity) {
-      try {
-        if (isSale) {
-          // --- CALL SALES API (Records Sale + Deducts Stock) ---
-          const salePayload = {
-            ProductId: product.id,
-            Quantity: quantity,
-            SoldBy: soldBy,
-            ApprovedBy: profile.name // User from profile state
-          };
-
-          const res = await fetch("https://localhost:7262/api/sales", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(salePayload)
-          });
-
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.message || "Sale failed");
-
-          const revenue = quantity * product.price;
-          Swal.fire('Sold!', `Revenue: $${revenue.toLocaleString()}`, 'success');
-
-        } else {
-          // --- CALL PRODUCTS API (Restock Only) ---
-          const newStockLevel = product.stock + quantity;
-          const res = await fetch(`https://localhost:7262/api/products/${product.id}`, {
+      
+      if (value) {
+        try {
+          const newStock = product.stock + parseInt(value);
+          const res = await fetch(`https://localhost:7262/api/products/details/${product.id}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ 
-               id: product.id, 
-               name: product.name,
-               newStock: newStockLevel 
+            body: JSON.stringify({
+              Name: product.name,
+              Category: product.category,
+              Price: product.price,
+              MinStock: product.minStock,
+              Stock: newStock
             })
           });
 
-          if (!res.ok) throw new Error("Failed to update stock");
-          Swal.fire('Restocked!', 'Inventory updated.', 'success');
+          if (!res.ok) throw new Error("Failed to restock");
+          
+          Swal.fire('Restocked!', `${value} items added.`, 'success');
+          fetchProducts();
+        } catch (err) {
+          Swal.fire('Error', err.message, 'error');
         }
-
-        // Refresh both tables to reflect changes
-        fetchProducts();
-        fetchSales();
-
-      } catch (err) {
-        Swal.fire('Error', err.message, 'error');
       }
     }
   };
 
-  // --- 4. DELETE PRODUCT (DELETE API) ---
+  // --- 4. DELETE PRODUCT ---
   const handleDelete = (id) => {
     Swal.fire({
       title: 'Delete Product?', text: "Irreversible action.", icon: 'warning',
@@ -355,7 +541,6 @@ export default function AdminStocks() {
         try {
           const res = await fetch(`https://localhost:7262/api/products/${id}`, { method: "DELETE" });
           if (!res.ok) throw new Error("Failed to delete product");
-          
           fetchProducts();
           Swal.fire('Deleted!', 'Product removed from database.', 'success');
         } catch (err) {
@@ -365,19 +550,12 @@ export default function AdminStocks() {
     });
   };
 
-  // --- EXCEL DOWNLOAD (With Approved By) ---
+  // --- EXCEL DOWNLOAD ---
   const handleDownloadExcel = () => {
-    // 1. Prepare Inventory Sheet
     const inventoryData = products.map(p => ({
-      ID: p.id,
-      Name: p.name,
-      Category: p.category,
-      Price: `$${p.price}`,
-      Stock: p.stock,
-      Status: p.status
+      ID: p.id, Name: p.name, Category: p.category, Price: `$${p.price}`, Stock: p.stock, Status: p.status
     }));
 
-    // 2. Prepare Sales Sheet
     const salesDataToExport = salesDateFilter ? filteredSales : salesLog;
     const totalRevenue = salesDataToExport.reduce((sum, item) => sum + item.total, 0);
     const totalItemsSold = salesDataToExport.reduce((sum, item) => sum + item.quantity, 0);
@@ -386,43 +564,34 @@ export default function AdminStocks() {
     const salesSheetData = [
       ["STOCKMASTER SALES REPORT"],
       [`Generated: ${reportDate}`],
-      [`Filter Applied: ${salesDateFilter ? salesDateFilter : "All Time"}`],
-      [""],
       ["PERFORMANCE SUMMARY"],
-      ["Total Revenue", "Total Items Sold", "Transactions Count"],
-      [`$${totalRevenue.toLocaleString()}`, totalItemsSold, salesDataToExport.length],
+      ["Total Revenue", "Total Items Sold"],
+      [`$${totalRevenue.toLocaleString()}`, totalItemsSold],
       [""],
       ["TRANSACTION DETAILS"],
-      ["ID", "Date", "Product", "Sold By", "Approved By", "Qty", "Revenue"] // Header Row
+      ["ID", "Date", "Product", "Type", "Customer", "Sold By", "Qty", "Revenue"]
     ];
 
     salesDataToExport.forEach(s => {
       salesSheetData.push([
-        s.id,
-        s.date,
-        s.product,
-        s.soldBy,
-        s.approvedBy,
-        s.quantity,
-        `$${s.total.toLocaleString()}`
+        s.id, s.date, s.product, s.salesType, s.customerName, s.soldBy, s.quantity, `$${s.total.toLocaleString()}`
       ]);
     });
 
     const wb = XLSX.utils.book_new();
     const wsInventory = XLSX.utils.json_to_sheet(inventoryData);
     const wsSales = XLSX.utils.aoa_to_sheet(salesSheetData); 
-
-    const wscols = [{ wch: 15 }, { wch: 25 }, { wch: 25 }, { wch: 20 }, { wch: 20 }, { wch: 10 }, { wch: 15 }];
+    const wscols = [{ wch: 15 }, { wch: 25 }, { wch: 25 }, { wch: 10 }, { wch: 20 }, { wch: 20 }, { wch: 10 }, { wch: 15 }];
     wsSales['!cols'] = wscols;
 
     XLSX.utils.book_append_sheet(wb, wsInventory, "Inventory");
     XLSX.utils.book_append_sheet(wb, wsSales, "Sales Report");
     XLSX.writeFile(wb, "StockMaster_Report.xlsx");
     
-    Swal.fire({ icon: 'success', title: 'Report Downloaded', text: 'Excel file generated with enhanced formatting.', toast: true, position: 'top-end', timer: 3000, showConfirmButton: false });
+    Swal.fire({ icon: 'success', title: 'Report Downloaded', toast: true, position: 'top-end', timer: 3000, showConfirmButton: false });
   };
 
-  // --- SETTINGS: PROFILE UPDATE ---
+  // --- SETTINGS UPDATES ---
   const handleProfileUpdate = async (e) => {
     e.preventDefault();
     const loggedUser = JSON.parse(localStorage.getItem("loggedInUser"));
@@ -439,25 +608,20 @@ export default function AdminStocks() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || "Failed");
       
-      // Update State and Local Storage
       setProfile({ name: data.fullName, email: data.email, id: loggedUser.id });
       localStorage.setItem("loggedInUser", JSON.stringify({ ...loggedUser, name: data.fullName, email: data.email }));
-      
       Swal.fire('Success', 'Profile updated!', 'success');
     } catch (err) { Swal.fire('Error', err.message, 'error'); }
   };
 
-  // --- SETTINGS: PASSWORD CHANGE ---
   const handlePasswordChange = async (e) => {
     e.preventDefault();
     if (passwords.new !== passwords.confirm) return Swal.fire('Error', 'Passwords mismatch', 'error');
-    
     const loggedUser = JSON.parse(localStorage.getItem("loggedInUser"));
     if(!loggedUser?.id && profile.email === "manager@stockmaster.com") {
         setPasswords({ current: "", new: "", confirm: "" });
         return Swal.fire('Success', 'Password changed (Mock)!', 'success');
     }
-    
     try {
       const response = await fetch(`https://localhost:7262/api/auth/change-password/${loggedUser.id}`, {
         method: "PUT",
@@ -465,7 +629,6 @@ export default function AdminStocks() {
         body: JSON.stringify({ currentPassword: passwords.current, newPassword: passwords.new })
       });
       if (!response.ok) throw new Error("Failed to change password");
-      
       setPasswords({ current: "", new: "", confirm: "" });
       Swal.fire('Success', 'Password changed!', 'success');
     } catch (err) { Swal.fire('Error', err.message, 'error'); }
@@ -488,6 +651,36 @@ export default function AdminStocks() {
           <div className="brand-logo"><span className="logo-icon">📦</span> StockMaster</div>
         </div>
         <div className="header-right">
+          
+          {/* NOTIFICATION ICON WITH CLICK HANDLER */}
+          <div 
+             className="notification-wrapper" 
+             onClick={handleNotificationClick} 
+             style={{ marginRight: '15px', position: 'relative', cursor: 'pointer' }} 
+             title={nearDueCount > 0 ? `${nearDueCount} Payments Due Soon` : "No pending alerts"}
+          >
+             <span style={{ fontSize: '1.2rem' }}>🔔</span>
+             {nearDueCount > 0 && (
+                 <span style={{
+                     position: 'absolute',
+                     top: '-5px',
+                     right: '-5px',
+                     background: '#ef4444',
+                     color: 'white',
+                     borderRadius: '50%',
+                     width: '18px',
+                     height: '18px',
+                     fontSize: '0.7rem',
+                     display: 'flex',
+                     alignItems: 'center',
+                     justifyContent: 'center',
+                     fontWeight: 'bold'
+                 }}>
+                     {nearDueCount}
+                 </span>
+             )}
+          </div>
+
           <div className="admin-profile">
             <div className="text-info">
               <span className="name">{profile.name}</span>
@@ -510,6 +703,10 @@ export default function AdminStocks() {
             </button>
             <button className={`nav-item ${activeView === 'sales' ? 'active' : ''}`} onClick={() => setActiveView('sales')}>
               <span className="icon">💰</span> Sales History
+            </button>
+            {/* CREDIT SALES TAB */}
+            <button className={`nav-item ${activeView === 'credits' ? 'active' : ''}`} onClick={() => setActiveView('credits')}>
+              <span className="icon">💳</span> Credit Sales
             </button>
             <button className={`nav-item ${activeView === 'settings' ? 'active' : ''}`} onClick={() => setActiveView('settings')}>
               <span className="icon">⚙️</span> Settings
@@ -541,9 +738,7 @@ export default function AdminStocks() {
                 </div>
 
                 <div className="admin-card">
-                  <div className="card-header-simple">
-                    <h2>Current Inventory</h2>
-                  </div>
+                  <div className="card-header-simple"><h2>Current Inventory</h2></div>
                   <div className="card-body">
                     <div className="table-controls">
                       <div className="search-wrapper">
@@ -588,14 +783,9 @@ export default function AdminStocks() {
                                   <span className={`status-badge ${p.status.toLowerCase().replace(/\s/g, '-')}`}>{p.status}</span>
                                 </td>
                                 <td className="text-right">
-                                  {/* EDIT AND DELETE BUTTONS */}
                                   <div style={{display: 'flex', gap: '5px', justifyContent: 'flex-end'}}>
-                                    <button className="icon-btn edit" title="Edit" style={{backgroundColor: '#3b82f6', color:'white', padding:'4px 6px', borderRadius:'4px', border:'none', cursor:'pointer'}} onClick={() => handleEditProduct(p)}>
-                                        ✏️
-                                    </button>
-                                    <button className="icon-btn delete" title="Delete" onClick={() => handleDelete(p.id)}>
-                                        🗑️
-                                    </button>
+                                    <button className="icon-btn edit" onClick={() => handleEditProduct(p)}>✏️</button>
+                                    <button className="icon-btn delete" onClick={() => handleDelete(p.id)}>🗑️</button>
                                   </div>
                                 </td>
                               </tr>
@@ -606,8 +796,6 @@ export default function AdminStocks() {
                         </tbody>
                       </table>
                     </div>
-
-                    {/* Pagination for Inventory */}
                     {totalInventoryPages > 1 && (
                       <div className="pagination-container">
                         <button className="page-btn nav" onClick={() => paginateInventory(inventoryPage - 1)} disabled={inventoryPage === 1}>&lt;</button>
@@ -626,21 +814,27 @@ export default function AdminStocks() {
             {activeView === 'sales' && (
               <div className="fade-in">
                 <div className="section-header">
-                  <div>
-                    <h2>Sales History</h2>
-                    <p className="subtitle">Track every transaction made from the inventory.</p>
-                  </div>
+                  <div><h2>Sales History</h2><p className="subtitle">Track every transaction.</p></div>
                   <div className="header-actions" style={{ display: 'flex', gap: '10px' }}>
-                    <input type="date" className="form-input" style={{ width: 'auto', padding: '8px 12px' }} value={salesDateFilter} onChange={(e) => { setSalesDateFilter(e.target.value); setSalesPage(1); }} />
-                    <button className="secondary-btn" onClick={handleDownloadExcel}>⬇ Download Report</button>
+                    {/* Styled Date Picker for Filtering */}
+                    <div className="date-input-wrapper" style={{display:'flex', alignItems:'center', background:'white', border:'1px solid #ddd', borderRadius:'6px', padding:'0 10px'}}>
+                        <span style={{marginRight:'5px'}}>📅</span>
+                        <input 
+                            type="date" 
+                            style={{ border:'none', outline:'none', padding:'8px 0', fontFamily:'inherit', color:'#4b5563' }} 
+                            value={salesDateFilter} 
+                            onChange={(e) => { setSalesDateFilter(e.target.value); setSalesPage(1); }} 
+                        />
+                    </div>
+                    <button className="secondary-btn" onClick={handleDownloadExcel}>⬇ Report</button>
                   </div>
                 </div>
 
                 <div className="admin-card">
                   <div className="card-header-simple" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <h3>{salesDateFilter ? `Transactions on ${salesDateFilter}` : 'All Transactions'}</h3>
+                    <h3>All Transactions</h3>
                     <div className="stat-value text-success" style={{ fontSize: '1rem' }}>
-                      Revenue:  {filteredSales.reduce((a, b) => a + b.total, 0).toLocaleString()} Birr
+                      Rev: {filteredSales.reduce((a, b) => a + b.total, 0).toLocaleString()} Birr
                     </div>
                   </div>
                   <div className="card-body">
@@ -649,9 +843,11 @@ export default function AdminStocks() {
                         <thead>
                           <tr>
                             <th className="text-left">Date</th>
-                            <th className="text-left">Product Name</th>
+                            <th className="text-left">Product</th>
+                            <th className="text-center">Type</th>
+                            <th className="text-center">Customer</th>
                             <th className="text-center">Sold By</th>
-                            <th className="text-center">Approved By</th>
+                            <th className="text-center">Approved By</th> 
                             <th className="text-center">Qty</th>
                             <th className="text-right">Revenue</th>
                           </tr>
@@ -662,20 +858,22 @@ export default function AdminStocks() {
                               <tr key={sale.id}>
                                 <td className="text-left text-muted">{sale.date}</td>
                                 <td className="text-left font-weight-600">{sale.product}</td>
-                                <td className="text-center">{sale.soldBy || "-"}</td>
-                                <td className="text-center"><span style={{ background: '#f1f5f9', padding: '2px 8px', borderRadius: '4px', fontSize: '0.8rem' }}>{sale.approvedBy}</span></td>
+                                <td className="text-center">
+                                    <span className={`category-tag ${sale.salesType === 'Credit' ? 'red-bg' : ''}`}>{sale.salesType}</span>
+                                </td>
+                                <td className="text-center">{sale.customerName}</td>
+                                <td className="text-center">{sale.soldBy}</td>
+                                <td className="text-center">{sale.approvedBy}</td> 
                                 <td className="text-center">{sale.quantity}</td>
-                                <td className="text-right text-success font-weight-bold">{sale.total.toLocaleString()} Birr</td>
+                                <td className="text-right text-success font-weight-bold">{sale.total.toLocaleString()}</td>
                               </tr>
                             ))
                           ) : (
-                            <tr><td colSpan="6" className="text-center">No transactions found.</td></tr>
+                            <tr><td colSpan="8" className="text-center">No transactions found.</td></tr>
                           )}
                         </tbody>
                       </table>
                     </div>
-
-                    {/* Pagination for Sales */}
                     {totalSalesPages > 1 && (
                       <div className="pagination-container">
                         <button className="page-btn nav" onClick={() => paginateSales(salesPage - 1)} disabled={salesPage === 1}>&lt;</button>
@@ -690,51 +888,158 @@ export default function AdminStocks() {
               </div>
             )}
 
-            {/* --- VIEW 3: SETTINGS --- */}
+            {/* --- VIEW 3: CREDIT SALES (UPDATED with TOGGLE) --- */}
+            {activeView === 'credits' && (
+              <div className="fade-in">
+                <div className="section-header">
+                  <div><h2>Credit Sales Management</h2><p className="subtitle">Track outstanding payments.</p></div>
+                  <div className="header-actions" style={{ display: 'flex', gap: '10px' }}>
+                    
+                    {/* CREDIT VIEW TOGGLE BUTTONS */}
+                    <div style={{ display: 'flex', gap: '5px', background: '#e5e7eb', padding: '4px', borderRadius: '8px' }}>
+                        <button 
+                            onClick={() => { setCreditViewMode('active'); setCreditPage(1); }}
+                            style={{
+                                padding: '6px 12px',
+                                border: 'none',
+                                borderRadius: '6px',
+                                fontSize: '0.9rem',
+                                fontWeight: '600',
+                                cursor: 'pointer',
+                                background: creditViewMode === 'active' ? 'white' : 'transparent',
+                                color: creditViewMode === 'active' ? '#4f46e5' : '#6b7280',
+                                boxShadow: creditViewMode === 'active' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                                transition: 'all 0.2s'
+                            }}
+                        >
+                            Active Credits
+                        </button>
+                        <button 
+                             onClick={() => { setCreditViewMode('overdue'); setCreditPage(1); }}
+                             style={{
+                                padding: '6px 12px',
+                                border: 'none',
+                                borderRadius: '6px',
+                                fontSize: '0.9rem',
+                                fontWeight: '600',
+                                cursor: 'pointer',
+                                background: creditViewMode === 'overdue' ? '#fee2e2' : 'transparent',
+                                color: creditViewMode === 'overdue' ? '#b91c1c' : '#6b7280',
+                                boxShadow: creditViewMode === 'overdue' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                                transition: 'all 0.2s'
+                            }}
+                        >
+                            Overdue / Past Due ⚠️
+                        </button>
+                    </div>
+
+                    {/* CREDIT DATE PICKER */}
+                    <div className="date-input-wrapper" style={{display:'flex', alignItems:'center', background:'white', border:'1px solid #ddd', borderRadius:'6px', padding:'0 10px'}}>
+                        <span style={{marginRight:'5px'}}>📅</span>
+                        <input 
+                            type="date" 
+                            style={{ border:'none', outline:'none', padding:'8px 0', fontFamily:'inherit', color:'#4b5563' }} 
+                            value={creditDateFilter} 
+                            onChange={(e) => { setCreditDateFilter(e.target.value); setCreditPage(1); }} 
+                        />
+                    </div>
+                  
+                  </div>
+                </div>
+
+                <div className="admin-card">
+                  <div className="card-header-simple">
+                      <h3 style={{ color: creditViewMode === 'overdue' ? '#b91c1c' : 'inherit' }}>
+                          {creditViewMode === 'active' ? 'Current Outstanding Credits' : 'Overdue & Past Payments'}
+                      </h3>
+                  </div>
+                  <div className="card-body">
+                    <div className="table-responsive">
+                      <table className="custom-table">
+                        <thead>
+                          <tr>
+                            <th className="text-left">Date Sold</th>
+                            <th className="text-left">Customer Name</th>
+                            <th className="text-left">Approved By</th> 
+                            <th className="text-left">Product</th>
+                            <th className="text-center">Due Date</th>
+                            <th className="text-center">Days Remaining</th>
+                            <th className="text-right">Amount Due</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {currentCreditSales.length > 0 ? (
+                            currentCreditSales.map((sale) => (
+                              <tr key={sale.id}>
+                                <td className="text-left text-muted">{sale.date}</td>
+                                <td className="text-left font-weight-600" style={{color: 'var(--primary)'}}>{sale.customerName}</td>
+                                <td className="text-left">{sale.approvedBy}</td> 
+                                <td className="text-left">{sale.product}</td>
+                                <td className="text-center">
+                                    <span style={{background:'#fee2e2', color:'#b91c1c', padding:'4px 8px', borderRadius:'4px', fontSize:'0.85rem', fontWeight:'600'}}>
+                                        {sale.creditDueDate}
+                                    </span>
+                                </td>
+                                <td className="text-center">
+                                    {sale.daysRemaining === null ? '-' : (
+                                        <span style={{
+                                            color: sale.daysRemaining <= 0 ? '#b91c1c' : (sale.daysRemaining <= 3 ? '#d97706' : 'inherit'),
+                                            fontWeight: 'bold'
+                                        }}>
+                                            {sale.daysRemaining <= 0 
+                                                ? `Overdue (${Math.abs(sale.daysRemaining)} days ago)` 
+                                                : `${sale.daysRemaining} Days`
+                                            }
+                                        </span>
+                                    )}
+                                </td>
+                                <td className="text-right font-weight-bold">{sale.total.toLocaleString()} Birr</td>
+                              </tr>
+                            ))
+                          ) : (
+                            <tr><td colSpan="7" className="text-center">No {creditViewMode} credit records found.</td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                    {totalCreditPages > 1 && (
+                      <div className="pagination-container">
+                        <button className="page-btn nav" onClick={() => paginateCredit(creditPage - 1)} disabled={creditPage === 1}>&lt;</button>
+                        {[...Array(totalCreditPages)].map((_, i) => (
+                          <button key={i} className={`page-btn ${creditPage === i + 1 ? 'active' : ''}`} onClick={() => paginateCredit(i + 1)}>{i + 1}</button>
+                        ))}
+                        <button className="page-btn nav" onClick={() => paginateCredit(creditPage + 1)} disabled={creditPage === totalCreditPages}>&gt;</button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* --- VIEW 4: SETTINGS --- */}
             {activeView === 'settings' && (
               <div className="fade-in">
                 <h2 className="mb-20">Account Settings</h2>
                 <div className="settings-grid-layout">
-                  {/* Profile Form */}
                   <div className="admin-card">
                     <div className="card-header-simple"><h3>Profile Information</h3></div>
                     <form onSubmit={handleProfileUpdate}>
                       <div className="card-body">
-                        <div className="form-group">
-                          <label>Full Name</label>
-                          <input type="text" className="form-input" value={profile.name} onChange={(e) => setProfile({ ...profile, name: e.target.value })} />
-                        </div>
-                        <div className="form-group">
-                          <label>Email Address</label>
-                          <input type="email" className="form-input" value={profile.email} onChange={(e) => setProfile({ ...profile, email: e.target.value })} />
-                        </div>
+                        <div className="form-group"><label>Full Name</label><input type="text" className="form-input" value={profile.name} onChange={(e) => setProfile({ ...profile, name: e.target.value })} /></div>
+                        <div className="form-group"><label>Email Address</label><input type="email" className="form-input" value={profile.email} onChange={(e) => setProfile({ ...profile, email: e.target.value })} /></div>
                       </div>
-                      <div className="card-footer">
-                        <button type="submit" className="primary-btn">Update Profile</button>
-                      </div>
+                      <div className="card-footer"><button type="submit" className="primary-btn">Update Profile</button></div>
                     </form>
                   </div>
-                  {/* Password Form */}
                   <div className="admin-card">
                     <div className="card-header-simple"><h3>Change Password</h3></div>
                     <form onSubmit={handlePasswordChange}>
                       <div className="card-body">
-                        <div className="form-group">
-                          <label>Current Password</label>
-                          <input type="password" className="form-input" value={passwords.current} onChange={(e) => setPasswords({ ...passwords, current: e.target.value })} />
-                        </div>
-                        <div className="form-group">
-                          <label>New Password</label>
-                          <input type="password" className="form-input" placeholder="Min 6 characters" value={passwords.new} onChange={(e) => setPasswords({ ...passwords, new: e.target.value })} />
-                        </div>
-                        <div className="form-group">
-                          <label>Confirm Password</label>
-                          <input type="password" className="form-input" value={passwords.confirm} onChange={(e) => setPasswords({ ...passwords, confirm: e.target.value })} />
-                        </div>
+                        <div className="form-group"><label>Current Password</label><input type="password" className="form-input" value={passwords.current} onChange={(e) => setPasswords({ ...passwords, current: e.target.value })} /></div>
+                        <div className="form-group"><label>New Password</label><input type="password" className="form-input" placeholder="Min 6 characters" value={passwords.new} onChange={(e) => setPasswords({ ...passwords, new: e.target.value })} /></div>
+                        <div className="form-group"><label>Confirm Password</label><input type="password" className="form-input" value={passwords.confirm} onChange={(e) => setPasswords({ ...passwords, confirm: e.target.value })} /></div>
                       </div>
-                      <div className="card-footer">
-                        <button type="submit" className="primary-btn warning">Change Password</button>
-                      </div>
+                      <div className="card-footer"><button type="submit" className="primary-btn warning">Change Password</button></div>
                     </form>
                   </div>
                 </div>

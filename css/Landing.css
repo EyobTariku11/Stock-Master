@@ -130,18 +130,19 @@ button {
 .hero-section {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 60px 20px 100px 20px; /* Adjusted padding */
+  padding: 60px 20px 100px 20px;
   display: flex;
   align-items: center;
   min-height: 85vh;
   position: relative;
-  overflow: hidden;
+  /* Allow overflow slightly so shadow/floating doesn't get clipped abruptly */
+  overflow: visible; 
 }
 
 .hero-content {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 40px;
+  gap: 60px; /* Increased gap for better spacing */
   align-items: center;
   width: 100%;
 }
@@ -183,14 +184,16 @@ button {
   display: flex;
   justify-content: center;
   align-items: center;
+  width: 100%;
+  height: 100%;
 }
 
-/* Create a soft glow behind the image */
+/* Soft glow behind the image */
 .gradient-blob {
   position: absolute;
-  width: 400px;
-  height: 400px;
-  background: radial-gradient(circle, rgba(99,102,241,0.15) 0%, rgba(248,250,252,0) 70%);
+  width: 450px;
+  height: 450px;
+  background: radial-gradient(circle, rgba(99,102,241,0.2) 0%, rgba(248,250,252,0) 70%);
   border-radius: 50%;
   z-index: 1;
   top: 50%;
@@ -200,12 +203,14 @@ button {
 
 .hero-img {
   width: 100%;
-  max-width: 500px;
+  max-width: 550px; /* Increased slightly */
   height: auto;
   z-index: 2;
   position: relative;
-  /* Removed border radius/shadow to allow blending */
-  filter: drop-shadow(0 20px 30px rgba(0,0,0,0.1)); 
+  /* Rounded corners and nice shadow for the new photo */
+  border-radius: 20px;
+  box-shadow: 0 20px 40px rgba(0,0,0,0.15); 
+  object-fit: cover;
 }
 
 /* Gentle floating animation */
@@ -215,7 +220,7 @@ button {
 
 @keyframes float {
   0% { transform: translateY(0px); }
-  50% { transform: translateY(-20px); }
+  50% { transform: translateY(-15px); }
   100% { transform: translateY(0px); }
 }
 
@@ -302,6 +307,7 @@ button {
   width: 100%;
   border-radius: 20px;
   box-shadow: var(--shadow-lg);
+  object-fit: cover;
 }
 
 .about-text h4 {
@@ -454,7 +460,7 @@ button {
 /* ===== RESPONSIVE ===== */
 @media (max-width: 968px) {
   .hero-content {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr; /* Stack vertically */
     text-align: center;
     gap: 50px;
   }
@@ -463,6 +469,9 @@ button {
   .hero-subtitle, .section-header { margin: 0 auto 30px auto; }
   .hero-cta { justify-content: center; }
   .gradient-blob { width: 300px; height: 300px; }
+  
+  /* Ensure image scales properly on tablets */
+  .hero-img { max-width: 80%; }
   
   .about-container, .contact-container { grid-template-columns: 1fr; }
   .about-image { order: -1; } /* Image on top for mobile */
@@ -497,6 +506,8 @@ button {
   .mobile-buttons button { width: 100%; }
   
   .hero-text-wrapper h1 { font-size: 2.4rem; }
+  .hero-img { max-width: 100%; }
+  
   .contact-text, .contact-form { padding: 30px 20px; }
   .footer-content { grid-template-columns: 1fr; text-align: center; gap: 30px; }
 }

@@ -1,9 +1,8 @@
 import React from "react";
-import { useAdminStocks } from "../hooks/useAdminStocks"; // Adjust path if needed
-import '../../css/Stock.css'; // Ensure this CSS file exists
+import { useAdminStocks } from "../hooks/useAdminStocks";
+import '../../css/Stock.css'; 
 
 export default function AdminStocks() {
-  // Destructure everything from the Hook
   const {
     activeView, setActiveView,
     isSidebarOpen, setIsSidebarOpen,
@@ -29,14 +28,13 @@ export default function AdminStocks() {
     handleEditProduct,
     handleStockAdjustment,
     handleDelete,
-    handleDownloadExcel,
+    handleGenerateReport,
     handleProfileUpdate,
     handlePasswordChange,
     handleLogout,
     handleTogglePaid
   } = useAdminStocks();
 
-  // Pagination UI Helper
   const renderPagination = (currentPage, totalPages, setPage) => (
     totalPages > 1 && (
       <div className="pagination-container">
@@ -49,18 +47,52 @@ export default function AdminStocks() {
     )
   );
 
+  // --- ULTRA-MODERN "APP LAUNCH" LOADER ---
+  if (isLoading) {
+    return (
+      <div style={{
+        position: 'fixed', inset: 0, zIndex: 10000,
+        backgroundColor: '#ffffff',
+        display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center',
+        transition: 'opacity 0.6s ease-out'
+      }}>
+        <style>{`
+          @keyframes slideIn { 0% { opacity: 0; transform: translateY(10px); } 100% { opacity: 1; transform: translateY(0); } }
+          @keyframes progressBar { 0% { width: 0%; } 50% { width: 70%; } 100% { width: 100%; } }
+          
+          .app-launch-container { text-align: center; font-family: 'Inter', system-ui, sans-serif; }
+          .launch-logo { font-size: 3rem; margin-bottom: 1rem; animation: slideIn 0.8s ease-out; }
+          .launch-title { font-size: 2rem; font-weight: 800; color: #0f172a; margin: 0; letter-spacing: -1px; animation: slideIn 0.8s ease-out 0.1s backwards; }
+          .launch-subtitle { font-size: 0.9rem; color: #64748b; margin-top: 5px; font-weight: 500; letter-spacing: 1px; text-transform: uppercase; animation: slideIn 0.8s ease-out 0.2s backwards; }
+          
+          .progress-container { width: 200px; height: 4px; background: #f1f5f9; border-radius: 4px; margin-top: 40px; overflow: hidden; position: relative; }
+          .progress-bar { height: 100%; background: linear-gradient(90deg, #3b82f6, #6366f1); border-radius: 4px; animation: progressBar 1.5s ease-in-out forwards; }
+        `}</style>
+
+        <div className="app-launch-container">
+          <div className="launch-logo">📦</div>
+          <h1 className="launch-title">Bektar Stock</h1>
+          <p className="launch-subtitle">Management System</p>
+
+          <div className="progress-container">
+            <div className="progress-bar"></div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="dashboard-container">
-      {/* HEADER */}
       <header className="top-header">
         <div className="header-left">
           <button className="hamburger-btn" onClick={() => setIsSidebarOpen(!isSidebarOpen)}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
           </button>
-          <div className="brand-logo"><span className="logo-icon">📦</span> StockMaster</div>
+          <div className="brand-logo"><span className="logo-icon">📦</span>  BektarStock</div>
         </div>
         <div className="header-right">
-          {/* Notification Icon */}
           <div className="notification-wrapper" onClick={handleNotificationClick} style={{ marginRight: '15px', position: 'relative', cursor: 'pointer' }}>
             <span style={{ fontSize: '1.2rem' }}>🔔</span>
             {nearDueCount > 0 && (
@@ -80,7 +112,6 @@ export default function AdminStocks() {
       </header>
 
       <div className="main-body">
-        {/* SIDEBAR */}
         <aside className={`sidebar ${isSidebarOpen ? 'open' : 'closed'}`}>
           <nav className="sidebar-nav">
             <button className={`nav-item ${activeView === 'inventory' ? 'active' : ''}`} onClick={() => setActiveView('inventory')}><span className="icon">📦</span> Inventory</button>
@@ -88,24 +119,22 @@ export default function AdminStocks() {
             <button className={`nav-item ${activeView === 'credits' ? 'active' : ''}`} onClick={() => setActiveView('credits')}><span className="icon">💳</span> Credit Sales</button>
             <button className={`nav-item ${activeView === 'settings' ? 'active' : ''}`} onClick={() => setActiveView('settings')}><span className="icon">⚙️</span> Settings</button>
           </nav>
-          <div className="sidebar-footer"><p>&copy; 2025 StockMaster</p></div>
+          <div className="sidebar-footer"><p>&copy; 2025 BektarStock | Tech by Eyob Tariku</p></div>
         </aside>
 
-        {/* MAIN CONTENT AREA */}
         <main className="main-content">
           <div className="content-wrapper">
 
-            {/* --- VIEW 1: INVENTORY --- */}
             {activeView === 'inventory' && (
               <div className="fade-in">
                 <div className="stats-grid">
                   <div className="stat-card">
                     <div className="stat-icon-wrapper blue">📋</div>
-                    <div><div className="stat-label">Total Products</div><div className="stat-value">{isLoading ? "..." : products.length}</div></div>
+                    <div><div className="stat-label">Total Products</div><div className="stat-value">{products.length}</div></div>
                   </div>
                   <div className="stat-card">
                     <div className="stat-icon-wrapper red">⚠️</div>
-                    <div><div className="stat-label">Critical Stock</div><div className="stat-value">{isLoading ? "..." : lowStockCount}</div></div>
+                    <div><div className="stat-label">Critical Stock</div><div className="stat-value">{lowStockCount}</div></div>
                   </div>
                   <div className="stat-card">
                     <div className="stat-icon-wrapper green">💵</div>
@@ -122,7 +151,7 @@ export default function AdminStocks() {
                         <input type="text" placeholder="Search products..." value={searchTerm} onChange={(e) => { setSearchTerm(e.target.value); setInventoryPage(1); }} />
                       </div>
                       <div className="action-buttons-group">
-                        <button className="secondary-btn" onClick={handleDownloadExcel}>⬇ Excel Report</button>
+                        <button className="secondary-btn" onClick={() => handleGenerateReport('inventory')}>⬇ Inventory Report</button>
                         <button className="add-user-btn" onClick={handleAddProduct}>+ Add Product</button>
                       </div>
                     </div>
@@ -140,8 +169,7 @@ export default function AdminStocks() {
                           </tr>
                         </thead>
                         <tbody>
-                          {isLoading ? (<tr><td colSpan="6" className="text-center">Loading...</td></tr>) :
-                            currentProducts.length > 0 ? (
+                          {currentProducts.length > 0 ? (
                               currentProducts.map((p) => (
                                 <tr key={p.id}>
                                   <td className="text-left font-weight-600">{p.name}</td>
@@ -174,7 +202,6 @@ export default function AdminStocks() {
               </div>
             )}
 
-            {/* --- VIEW 2: SALES HISTORY --- */}
             {activeView === 'sales' && (
               <div className="fade-in">
                 <div className="section-header">
@@ -184,7 +211,7 @@ export default function AdminStocks() {
                       <span style={{ marginRight: '5px' }}>📅</span>
                       <input type="date" style={{ border: 'none', outline: 'none' }} value={salesDateFilter} onChange={(e) => { setSalesDateFilter(e.target.value); setSalesPage(1); }} />
                     </div>
-                    <button className="secondary-btn" onClick={handleDownloadExcel}>⬇ Report</button>
+                    <button className="secondary-btn" onClick={() => handleGenerateReport('sales')}>⬇ Sales Report</button>
                   </div>
                 </div>
 
@@ -199,6 +226,7 @@ export default function AdminStocks() {
                             <th className="text-center">Type</th>
                             <th className="text-center">Customer</th>
                             <th className="text-center">Sold By</th>
+                            <th className="text-center">Approved By</th>
                             <th className="text-center">Qty</th>
                             <th className="text-right">Revenue</th>
                             <th className="text-center">Status</th>
@@ -213,6 +241,7 @@ export default function AdminStocks() {
                                 <td className="text-center"><span className={`category-tag ${sale.salesType === 'Credit' ? 'red-bg' : ''}`}>{sale.salesType}</span></td>
                                 <td className="text-center">{sale.customerName}</td>
                                 <td className="text-center">{sale.soldBy}</td>
+                                <td className="text-center">{sale.approvedBy}</td>
                                 <td className="text-center">{sale.quantity}</td>
                                 <td className="text-right text-success font-weight-bold">{sale.total.toLocaleString()}</td>
                                 <td className="text-center">
@@ -222,7 +251,7 @@ export default function AdminStocks() {
                                 </td>
                               </tr>
                             ))
-                          ) : (<tr><td colSpan="8" className="text-center">No transactions found.</td></tr>)}
+                          ) : (<tr><td colSpan="9" className="text-center">No transactions found.</td></tr>)}
                         </tbody>
                       </table>
                     </div>
@@ -232,14 +261,12 @@ export default function AdminStocks() {
               </div>
             )}
 
-            {/* --- VIEW 3: CREDIT SALES --- */}
             {activeView === 'credits' && (
               <div className="fade-in">
                 <div className="section-header">
                   <div><h2>Credit Sales Management</h2></div>
                   <div className="header-actions" style={{ display: 'flex', gap: '10px' }}>
 
-                    {/* TOGGLE BUTTONS GROUP */}
                     <div style={{ display: 'flex', gap: '5px', background: '#e5e7eb', padding: '4px', borderRadius: '8px' }}>
                       <button onClick={() => { setCreditViewMode('active'); setCreditPage(1); }}
                         style={{
@@ -295,6 +322,7 @@ export default function AdminStocks() {
                             <th className="text-center">Qty</th>
                             <th className="text-center">Days Left</th>
                             <th className="text-center">Status</th>
+                            {creditViewMode === 'paid' && <th className="text-center">Payment Approved By</th>}
                             <th className="text-center">Mark Paid</th>
                           </tr>
                         </thead>
@@ -312,17 +340,20 @@ export default function AdminStocks() {
                                     {sale.status}
                                   </span>
                                 </td>
+                                {creditViewMode === 'paid' && <td className="text-center">{sale.paymentApprovedBy}</td>}
                                 <td className="text-center">
                                   <input
                                     type="checkbox"
                                     checked={sale.isPaid}
+                                    disabled={sale.isPaid}
                                     onChange={() => handleTogglePaid(sale.id)}
+                                    style={{ cursor: sale.isPaid ? 'not-allowed' : 'pointer' }}
                                   />
                                 </td>
                               </tr>
                             ))
                           ) : (
-                            <tr><td colSpan="7" className="text-center">No credit sales found.</td></tr>
+                            <tr><td colSpan={creditViewMode === 'paid' ? "8" : "7"} className="text-center">No credit sales found.</td></tr>
                           )}
                         </tbody>
                       </table>
@@ -334,7 +365,6 @@ export default function AdminStocks() {
               </div>
             )}
 
-            {/* --- VIEW 4: SETTINGS --- */}
             {activeView === 'settings' && (
               <div className="fade-in">
                 <h2 className="mb-20">Account Settings</h2>

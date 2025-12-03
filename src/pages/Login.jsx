@@ -125,7 +125,7 @@ export default function Login() {
         <div className="login-form-side">
           <div className="form-content">
             <Link to="/" className="brand-logo">
-              <span className="logo-icon">📦</span> StockMaster
+              <span className="logo-icon">📦</span> BektarStock
             </Link>
 
             <div className="header-text">

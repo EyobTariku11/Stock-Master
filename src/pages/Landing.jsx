@@ -10,12 +10,13 @@ export default function Landing() {
     navigate('/Login');
   };
 
-  // Function to smooth scroll to About section
-  const handleLearnMore = () => {
-    const aboutSection = document.getElementById('about');
-    if (aboutSection) {
-      aboutSection.scrollIntoView({ behavior: 'smooth' });
+  // Function to smooth scroll to specific sections
+  const scrollToSection = (id) => {
+    const section = document.getElementById(id);
+    if (section) {
+      section.scrollIntoView({ behavior: 'smooth' });
     }
+    setIsMobileMenuOpen(false); // Close menu on mobile click
   };
 
   const toggleMenu = () => {
@@ -29,13 +30,14 @@ export default function Landing() {
         <div className="nav-content">
           <div className="logo">
             <span className="logo-icon">📦</span>
-            <span className="logo-text">StockMaster</span>
+            <span className="logo-text">BektarStock</span>
           </div>
 
-          {/* Desktop Links - "About" removed as requested */}
           <nav className={`nav-links ${isMobileMenuOpen ? 'active' : ''}`}>
-            <a href="#features" onClick={() => setIsMobileMenuOpen(false)}>Features</a>
-            <a href="#contact" onClick={() => setIsMobileMenuOpen(false)}>Contact Us</a>
+            {/* Changed to use scrollToSection function for better handling */}
+            <a href="#features" onClick={(e) => { e.preventDefault(); scrollToSection('features'); }}>Features</a>
+            <a href="#about" onClick={(e) => { e.preventDefault(); scrollToSection('about'); }}>About Us</a>
+            <a href="#contact" onClick={(e) => { e.preventDefault(); scrollToSection('contact'); }}>Contact Us</a>
             
             <div className="mobile-buttons">
                <button className="btn-primary" onClick={handleGetStarted}>Get Started</button>
@@ -68,22 +70,20 @@ export default function Landing() {
             </p>
             
             <div className="hero-cta">
-              {/* Changed to Learn More */}
-              <button className="btn-primary large" onClick={handleLearnMore}>
+              <button className="btn-primary large" onClick={() => scrollToSection('about')}>
                 Learn More
               </button>
             </div>
-            
-            {/* Stats removed as requested */}
           </div>
           
           <div className="hero-image-wrapper">
             {/* Background Blob for blending effect */}
             <div className="gradient-blob"></div>
-            {/* Transparent illustration that blends in */}
+            
+            {/* UPDATED IMAGE SOURCE: Using a reliable high-quality warehouse image */}
             <img 
-              src="https://cdn3d.iconscout.com/3d/premium/thumb/logistics-delivery-4421110-3669041.png" 
-              alt="Stock Management Illustration" 
+              src="https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80" 
+              alt="Warehouse Inventory Management" 
               className="hero-img floating"
             />
           </div>
@@ -116,7 +116,7 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* ===== NEW ABOUT US SECTION ===== */}
+      {/* ===== ABOUT US SECTION ===== */}
       <section id="about" className="about-section">
         <div className="about-container">
           <div className="about-image">
@@ -129,7 +129,7 @@ export default function Landing() {
             <h4>About Us</h4>
             <h2>We help small businesses scale efficiently.</h2>
             <p>
-              Founded in 2023, StockMaster started with a simple mission: to replace 
+              Founded in 2025, BektarStock started with a simple mission: to replace 
               clunky spreadsheets with a modern, intuitive inventory tool.
             </p>
             <p>
@@ -162,14 +162,14 @@ export default function Landing() {
           <div className="contact-text">
             <h2>Get in Touch</h2>
             <p>
-              Have questions about how StockMaster fits your business? 
+              Have questions about how BektarStock fits your business? 
               Fill out the form and our team will get back to you shortly.
             </p>
             
             <div className="contact-details">
               <div className="detail-item">
                 <span className="detail-icon">📧</span>
-                <span>support@stockmaster.com</span>
+                <span>support@BektarStock.com</span>
               </div>
               <div className="detail-item">
                 <span className="detail-icon">📍</span>
@@ -204,7 +204,7 @@ export default function Landing() {
           <div className="footer-brand">
             <div className="logo">
               <span className="logo-icon">📦</span>
-              <span className="logo-text">StockMaster</span>
+              <span className="logo-text">BektarStock</span>
             </div>
             <p>Simplifying inventory management for businesses of all sizes.</p>
           </div>
@@ -229,7 +229,7 @@ export default function Landing() {
           </div>
         </div>
         <div className="footer-bottom">
-          <p>&copy; {new Date().getFullYear()} StockMaster Inc. All rights reserved.</p>
+          <p>&copy; {new Date().getFullYear()} BektarStock Inc. All rights reserved.| Tech by Eyob Tariku</p>
         </div>
       </footer>
     </div>

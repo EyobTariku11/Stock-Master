@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import Swal from 'sweetalert2';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs'; 
+import { saveAs } from 'file-saver';
 
 export const useAdminStocks = () => {
   const navigate = useNavigate();
@@ -10,8 +11,10 @@ export const useAdminStocks = () => {
   const [activeView, setActiveView] = useState("inventory");
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth > 900);
   const [searchTerm, setSearchTerm] = useState("");
+  
+  // Loading State
   const [isLoading, setIsLoading] = useState(true);
-
+  
   // Data Containers
   const [products, setProducts] = useState([]);
   const [salesLog, setSalesLog] = useState([]);
@@ -31,9 +34,8 @@ export const useAdminStocks = () => {
     const storedUser = localStorage.getItem("loggedInUser");
     return storedUser
       ? JSON.parse(storedUser)
-      : { name: "Stock Manager", email: "manager@stockmaster.com", status: "active" };
+      : { name: "Stock Manager", email: "manager@bektarstock.com", status: "active" };
   });
-  const adminName = profile?.name;
 
   const [passwords, setPasswords] = useState({ current: "", new: "", confirm: "" });
 
@@ -48,15 +50,41 @@ export const useAdminStocks = () => {
 
   // --- 2. INITIAL FETCH & LISTENERS ---
   useEffect(() => {
-    fetchProducts();
-    fetchSales();
+    const initData = async () => {
+      setIsLoading(true);
+      const start = Date.now();
+
+      // Fetch data
+      await Promise.all([fetchProducts(), fetchSales()]);
+      
+      // Artificial delay to allow the "App Launch" animation to play smoothly
+      const end = Date.now();
+      const duration = end - start;
+      const minLoadingTime = 1500; 
+      const delay = duration < minLoadingTime ? minLoadingTime - duration : 0;
+
+      setTimeout(() => {
+        setIsLoading(false);
+      }, delay);
+    };
+
+    initData();
 
     const handleResize = () => setIsSidebarOpen(window.innerWidth > 900);
     window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    
+    // Background polling
+    const pollingInterval = setInterval(() => {
+      fetchSales(false); 
+    }, 10000);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      clearInterval(pollingInterval);
+    };
   }, []);
 
-  // --- AUTH STATUS CHECKER (FIXED) ---
+  // --- AUTH STATUS CHECKER ---
   useEffect(() => {
     const checkStatus = async () => {
       const userStr = localStorage.getItem("loggedInUser");
@@ -65,15 +93,12 @@ export const useAdminStocks = () => {
       const user = JSON.parse(userStr);
       if (!user || !user.id) return;
 
-      // FIX LINE 71: Correct URL to 'check-status' to avoid 404
       const url = `https://localhost:7262/api/auth/check-status/${user.id}`;
 
       try {
         const res = await fetch(url, { cache: "no-store" });
-        
         if (res.ok) {
             const data = await res.json();
-            // FIX: Backend returns { isActive: boolean }
             if (data.isActive === false) { 
               localStorage.removeItem("loggedInUser");
               Swal.fire({ icon: "error", title: "Access Revoked", text: "Your account has been deactivated.", allowOutsideClick: false })
@@ -108,12 +133,11 @@ export const useAdminStocks = () => {
     } catch (err) {
       console.error(err);
       Swal.fire({ icon: 'error', title: 'Connection Error', toast: true, position: 'top-end', timer: 3000, showConfirmButton: false });
-    } finally {
-      setIsLoading(false);
     }
   };
 
-  const fetchSales = async () => {
+  const fetchSales = async (showLoading = false) => {
+    if(showLoading) setIsLoading(true); 
     try {
       const res = await fetch("https://localhost:7262/api/sales");
       if (!res.ok) return;
@@ -133,11 +157,6 @@ export const useAdminStocks = () => {
         const status = s.status || s.Status; 
         const isPaid = status === "Completed";
 
-        let approvedByName = s.approvedBy || s.ApprovedBy;
-        if (s.salesType === "Credit" && status === "Completed") {
-          approvedByName = s.paymentApprovedBy || s.PaymentApprovedBy || approvedByName;
-        }
-
         return {
           id: s.id || s.Id,
           product: s.productName || s.ProductName,
@@ -146,7 +165,11 @@ export const useAdminStocks = () => {
           date: new Date(s.dateSold || s.DateSold).toLocaleDateString(),
           rawDate: s.dateSold || s.DateSold,
           soldBy: s.soldBy || s.SoldBy,
-          approvedBy: approvedByName,
+          
+          // Mapped separately
+          approvedBy: s.approvedBy || s.ApprovedBy || "-",
+          paymentApprovedBy: s.paymentApprovedBy || s.PaymentApprovedBy || "-",
+
           salesType: s.salesType || s.SalesType,
           customerName: s.customerName || s.CustomerName || "-",
           creditDueDate: (s.creditDueDate || s.CreditDueDate)
@@ -160,6 +183,8 @@ export const useAdminStocks = () => {
       setSalesLog(formattedSales);
     } catch (err) {
       console.error("Sales fetch error", err);
+    } finally {
+      if(showLoading) setIsLoading(false);
     }
   };
 
@@ -196,45 +221,55 @@ export const useAdminStocks = () => {
   const nearDueCount = nearDueItems.length;
 
   // --- 5. ACTION HANDLERS ---
-
-  const handleTogglePaid = async (id) => {
-    const adminName = profile?.name; // Make sure profile exists
-    if (!adminName) {
-      Swal.fire('Error', 'Admin name not found!', 'error');
-      return;
-    }
   
+  const handleTogglePaid = async (id) => {
+    if (!id) return;
+    const sale = salesLog.find(s => s.id === id);
+    if (!sale || sale.isPaid) return;
+
+    // CONFIRMATION DIALOG
+    const result = await Swal.fire({
+      title: 'Confirm Payment',
+      text: `Mark credit for ${sale.customerName} (${sale.total} Birr) as Paid?`,
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonColor: '#10b981', // Green color
+      cancelButtonColor: '#d33',
+      confirmButtonText: 'Yes, Mark Paid',
+      cancelButtonText: 'Cancel'
+    });
+
+    if (!result.isConfirmed) return;
+
     try {
+      const payload = {
+        ApprovedBy: profile.name || "Admin",
+        SalesType: "Credit",
+        ProductId: 0, 
+        Quantity: 1, 
+        SoldBy: "System",
+        CustomerName: "Existing",
+        CreditSaleDate: new Date().toISOString()
+      };
+
       const res = await fetch(`https://localhost:7262/api/sales/mark-paid/${id}`, {
-        method: "PUT",
+        method: 'PUT',
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ApprovedBy: adminName }) // Must match backend exactly
+        body: JSON.stringify(payload)
       });
   
-      const data = await res.json();
-  
-      if (!res.ok) {
-        Swal.fire('Error', data.message || 'Failed to mark as paid', 'error');
-        console.error("Error response:", data);
-        return;
+      if (res.status === 204) {
+         Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Marked as Paid', showConfirmButton: false, timer: 1500 });
+         fetchSales();
+         return;
       }
-  
-      Swal.fire('Success', 'Credit sale marked as paid!', 'success');
-  
-      // Update state
-      setCurrentCreditSales(prev =>
-        prev.map(s =>
-          s.id === id ? { ...s, isPaid: true, approvedBy: adminName, status: 'Completed' } : s
-        )
-      );
-  
-    } catch (err) {
-      console.error("Fetch error:", err);
-      Swal.fire('Error', 'Network error, try again', 'error');
-    }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Failed to mark as paid");
+      Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Marked as Paid', showConfirmButton: false, timer: 1500 });
+      fetchSales();
+    } catch (err) { Swal.fire('Error', err.message, 'error'); }
   };
-  
-  
+
   const handleNotificationClick = () => {
     if (nearDueCount === 0) {
       Swal.fire({ title: 'No New Alerts', text: 'No active payments due in the next 3 days.', icon: 'info' });
@@ -244,7 +279,6 @@ export const useAdminStocks = () => {
         <div style="text-align: left; margin-bottom: 8px;">
            <strong>${item.customerName}</strong>: ${item.total} Birr <span style="color:orange">(${item.daysRemaining} days left)</span>
         </div>`).join('');
-
     Swal.fire({
       title: '<strong>Upcoming Payments</strong>',
       html: `<div style="max-height: 200px; overflow-y: auto;">${listHtml}</div>`,
@@ -259,39 +293,64 @@ export const useAdminStocks = () => {
 
   const handleAddProduct = async () => {
     const { value: formValues } = await Swal.fire({
-      title: 'Add New Product',
-      html:
-        '<input id="swal-name" class="swal2-input" placeholder="Product Name">' +
-        '<input id="swal-cat" class="swal2-input" placeholder="Category">' +
-        '<input id="swal-price" type="number" class="swal2-input" placeholder="Price">' +
-        '<input id="swal-stock" type="number" class="swal2-input" placeholder="Initial Stock">',
-      focusConfirm: false,
+      title: "Add Product",
+      html: `
+        <div class="mini-form">
+          <input id="swal-name" class="mini-input" placeholder="Product Name">
+          <input id="swal-cat" class="mini-input" placeholder="Category (optional)">
+          <input id="swal-price" type="number" class="mini-input" placeholder="Price">
+          <input id="swal-stock" type="number" class="mini-input" placeholder="Initial Stock">
+        </div>
+      `,
       showCancelButton: true,
+      confirmButtonText: "Add",
+      cancelButtonText: "Cancel",
+      customClass: {
+        popup: "mini-popup",
+        confirmButton: "mini-btn-confirm",
+        cancelButton: "mini-btn-cancel",
+      },
+      focusConfirm: false,
       preConfirm: () => {
-        const name = document.getElementById('swal-name').value;
-        const cat = document.getElementById('swal-cat').value;
-        const price = document.getElementById('swal-price').value;
-        const stock = document.getElementById('swal-stock').value;
-        if (!name || !price || !stock) { Swal.showValidationMessage('Please fill all fields'); return false; }
+        const name = document.getElementById("swal-name").value;
+        const cat = document.getElementById("swal-cat").value;
+        const price = document.getElementById("swal-price").value;
+        const stock = document.getElementById("swal-stock").value;
+  
+        if (!name || !price || !stock) {
+          Swal.showValidationMessage("Please fill all required fields");
+          return false;
+        }
         return [name, cat, price, stock];
       }
     });
-
+  
     if (formValues) {
       const [name, cat, price, stock] = formValues;
+  
       try {
         const res = await fetch("https://localhost:7262/api/products", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ Name: name, Category: cat || "Uncategorized", Price: parseFloat(price), Stock: parseInt(stock), MinStock: 10 })
+          body: JSON.stringify({
+            Name: name,
+            Category: cat || "Uncategorized",
+            Price: parseFloat(price),
+            Stock: parseInt(stock),
+            MinStock: 10
+          })
         });
+  
         if (!res.ok) throw new Error("Failed to add product");
+  
         fetchProducts();
-        Swal.fire('Success', `${name} added to database.`, 'success');
-      } catch (err) { Swal.fire('Error', err.message, 'error'); }
+        Swal.fire("Success", `${name} added successfully.`, "success");
+      } catch (err) {
+        Swal.fire("Error", err.message, "error");
+      }
     }
   };
-
+  
   const handleEditProduct = async (product) => {
     const { value: formValues } = await Swal.fire({
       title: 'Edit Product',
@@ -365,7 +424,6 @@ export const useAdminStocks = () => {
           const popup = Swal.getPopup();
           const typeSelect = popup.querySelector('#swal-type');
           const dateInput = popup.querySelector('#swal-credit-date');
-          
           typeSelect.addEventListener('change', () => {
             const isCredit = typeSelect.value === 'Credit';
             if (isCredit) {
@@ -383,12 +441,10 @@ export const useAdminStocks = () => {
           const soldBy = document.getElementById('swal-soldBy').value;
           const customer = document.getElementById('swal-customer').value;
           const creditDate = document.getElementById('swal-credit-date').value;
-
           if (!qty || qty <= 0) return Swal.showValidationMessage('Invalid quantity');
           if (qty > product.stock) return Swal.showValidationMessage(`Insufficient stock.`);
           if (!soldBy) return Swal.showValidationMessage('Sold By is required.');
           if (type === 'Credit' && (!customer || !creditDate)) return Swal.showValidationMessage('Customer & Due Date required for credit.');
-
           return { qty, type, soldBy, customer, creditDate };
         }
       });
@@ -404,20 +460,15 @@ export const useAdminStocks = () => {
             CustomerName: formValues.customer || "Walk-in",
             CreditSaleDate: formValues.type === 'Cash' ? null : formValues.creditDate
           };
-
           const res = await fetch("https://localhost:7262/api/sales", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(salePayload)
           });
-          
-          if (res.status === 204) {
-             // success
-          } else if (!res.ok) {
+          if (res.status === 204) { /* success */ } else if (!res.ok) {
               const err = await res.json();
               throw new Error(err.message || "Sale failed");
           }
-
           Swal.fire({ icon: 'success', title: 'Sale Successful', timer: 2000, showConfirmButton: false });
           fetchProducts();
           fetchSales();
@@ -427,22 +478,13 @@ export const useAdminStocks = () => {
       const { value } = await Swal.fire({ title: `Restock ${product.name}`, input: 'number', inputLabel: 'Enter amount to add', confirmButtonText: 'Add Stock' });
       if (value && value > 0) {
         try {
-          const cleanProduct = {
-             Name: product.name,
-             Category: product.category,
-             Price: product.price,
-             MinStock: product.minStock,
-             Stock: product.stock + parseInt(value)
-          };
-
+          const cleanProduct = { Name: product.name, Category: product.category, Price: product.price, MinStock: product.minStock, Stock: product.stock + parseInt(value) };
           const res = await fetch(`https://localhost:7262/api/products/details/${product.id}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(cleanProduct)
           });
-
           if (res.status !== 204 && !res.ok) throw new Error("Failed to restock");
-          
           Swal.fire('Restocked!', `${value} items added.`, 'success');
           fetchProducts();
         } catch (err) { Swal.fire('Error', err.message, 'error'); }
@@ -450,25 +492,134 @@ export const useAdminStocks = () => {
     }
   };
 
-  const handleDownloadExcel = () => {
-    const inventoryData = products.map(p => ({ ID: p.id, Name: p.name, Category: p.category, Price: `${p.price}`, Stock: p.stock, Status: p.status }));
-    const salesDataToExport = salesDateFilter ? filteredSales : salesLog;
-    const reportDate = new Date().toLocaleString();
+  // --- REPORT GENERATOR ---
+  const handleGenerateReport = async (reportType = 'sales') => {
+    const workbook = new ExcelJS.Workbook();
+    const headerFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } }; 
+    const headerFont = { bold: true, color: { argb: 'FFFFFFFF' }, size: 12 };
+    const subHeaderFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } }; 
+    
+    if (reportType === 'inventory') {
+      const sheet = workbook.addWorksheet('Current Inventory');
+      sheet.mergeCells('A1:G1');
+      const titleCell = sheet.getCell('A1');
+      titleCell.value = 'BEKTAR STOCK - INVENTORY AUDIT REPORT';
+      titleCell.font = { size: 18, bold: true, color: { argb: 'FF1E293B' } };
+      titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+      sheet.getRow(1).height = 30;
+      sheet.mergeCells('A3:C3');
+      sheet.getCell('A3').value = "EXECUTIVE SUMMARY";
+      sheet.getCell('A3').font = { bold: true, size: 11 };
+      sheet.getCell('A3').fill = subHeaderFill;
+      const totalAssetValue = products.reduce((acc, p) => acc + (p.price * p.stock), 0);
+      sheet.getCell('A4').value = "Total Items:";
+      sheet.getCell('B4').value = products.length;
+      sheet.getCell('A5').value = "Total Asset Value:";
+      sheet.getCell('B5').value = totalAssetValue;
+      sheet.getCell('B5').numFmt = '#,##0.00 "Birr"';
+      sheet.getCell('A6').value = "Low Stock Alerts:";
+      sheet.getCell('B6').value = lowStockCount;
+      sheet.getCell('B6').font = { color: { argb: 'FFDC2626' }, bold: true }; 
+      const headers = ["Product Name", "Category", "Unit Price", "Quantity", "Total Value", "Min Stock", "Status"];
+      const headerRow = sheet.getRow(9);
+      headerRow.values = headers;
+      headerRow.eachCell((cell) => {
+        cell.fill = headerFill;
+        cell.font = headerFont;
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        cell.border = { bottom: {style:'medium'} };
+      });
+      headerRow.height = 24;
+      let currentRow = 10;
+      products.forEach((p, index) => {
+        const row = sheet.getRow(currentRow);
+        const totalValue = p.price * p.stock;
+        row.values = [p.name, p.category, p.price, p.stock, totalValue, p.minStock, p.status];
+        const isEven = index % 2 === 0;
+        row.eachCell((cell, colNum) => {
+          if (isEven) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+          cell.border = { bottom: {style:'dotted', color: {argb: 'FFCBD5E1'}} };
+          if(colNum >= 3 && colNum <= 6) cell.alignment = { horizontal: 'center' };
+          else cell.alignment = { horizontal: 'left' };
+        });
+        row.getCell(3).numFmt = '#,##0.00';
+        row.getCell(5).numFmt = '#,##0.00 "Birr"';
+        if (p.stock <= p.minStock) {
+          row.getCell(7).font = { color: { argb: 'FFDC2626' }, bold: true }; 
+          row.getCell(4).font = { color: { argb: 'FFDC2626' }, bold: true };
+        } else {
+          row.getCell(7).font = { color: { argb: 'FF16A34A' }, bold: true }; 
+        }
+        currentRow++;
+      });
+      sheet.columns = [{ width: 30 }, { width: 20 }, { width: 15 }, { width: 12 }, { width: 20 }, { width: 12 }, { width: 15 }];
+      saveAs(new Blob([await workbook.xlsx.writeBuffer()]), `Inventory_Report_${new Date().toISOString().split('T')[0]}.xlsx`);
 
-    const salesSheetData = [
-      ["STOCKMASTER SALES REPORT"], [`Generated: ${reportDate}`], ["ID", "Date", "Product", "Type", "Customer", "Sold By", "Qty", "Revenue", "Status"]
-    ];
-    salesDataToExport.forEach(s => {
-      salesSheetData.push([s.id, s.date, s.product, s.salesType, s.customerName, s.soldBy, s.quantity, `${s.total.toLocaleString()}`, s.status]);
-    });
-
-    const wb = XLSX.utils.book_new();
-    const wsInventory = XLSX.utils.json_to_sheet(inventoryData);
-    const wsSales = XLSX.utils.aoa_to_sheet(salesSheetData);
-    XLSX.utils.book_append_sheet(wb, wsInventory, "Inventory");
-    XLSX.utils.book_append_sheet(wb, wsSales, "Sales Report");
-    XLSX.writeFile(wb, "StockMaster_Report.xlsx");
-    Swal.fire({ icon: 'success', title: 'Report Downloaded', toast: true, timer: 3000 });
+    } else {
+      const sheet = workbook.addWorksheet('Sales Report');
+      const dataToExport = salesDateFilter ? filteredSales : salesLog;
+      sheet.mergeCells('A1:J1'); // Merging more cells to fit new column
+      const titleCell = sheet.getCell('A1');
+      titleCell.value = 'BEKTAR STOCK - SALES TRANSACTION REPORT';
+      titleCell.font = { size: 18, bold: true, color: { argb: 'FF1E293B' } };
+      titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+      sheet.getRow(1).height = 30;
+      sheet.mergeCells('A3:C3');
+      sheet.getCell('A3').value = "EXECUTIVE SUMMARY";
+      sheet.getCell('A3').font = { bold: true, size: 11 };
+      sheet.getCell('A3').fill = subHeaderFill;
+      const totalPeriodRevenue = dataToExport.reduce((acc, s) => acc + s.total, 0);
+      const cashSales = dataToExport.filter(s => s.salesType === 'Cash').reduce((acc, s) => acc + s.total, 0);
+      const creditSales = dataToExport.filter(s => s.salesType === 'Credit').reduce((acc, s) => acc + s.total, 0);
+      sheet.getCell('A4').value = "Total Revenue:";
+      sheet.getCell('B4').value = totalPeriodRevenue;
+      sheet.getCell('B4').numFmt = '#,##0.00 "Birr"';
+      sheet.getCell('B4').font = { bold: true, color: { argb: 'FF16A34A' } };
+      sheet.getCell('A5').value = "Total Transactions:";
+      sheet.getCell('B5').value = dataToExport.length;
+      sheet.getCell('A6').value = "Cash vs Credit:";
+      sheet.getCell('B6').value = `Cash: ${cashSales.toLocaleString()} | Credit: ${creditSales.toLocaleString()}`;
+      
+      // *** UPDATED HEADERS TO INCLUDE PAYMENT APPROVED BY ***
+      const headers = ["Date", "Product", "Type", "Customer", "Sold By", "Approved By", "Pmt Approved By", "Qty", "Price", "Status"];
+      const headerRow = sheet.getRow(9);
+      headerRow.values = headers;
+      headerRow.eachCell((cell) => {
+        cell.fill = headerFill;
+        cell.font = headerFont;
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        cell.border = { bottom: {style:'medium'} };
+      });
+      headerRow.height = 24;
+      let currentRow = 10;
+      dataToExport.forEach((s, index) => {
+        const row = sheet.getRow(currentRow);
+        // *** ADDED s.paymentApprovedBy TO THE VALUES ARRAY ***
+        row.values = [s.date, s.product, s.salesType, s.customerName, s.soldBy, s.approvedBy, s.paymentApprovedBy, s.quantity, s.total, s.status];
+        const isEven = index % 2 === 0;
+        row.eachCell((cell, colNum) => {
+          if (isEven) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+          cell.border = { bottom: {style:'dotted', color: {argb: 'FFCBD5E1'}} };
+          if(colNum >= 8) cell.alignment = { horizontal: 'center' };
+          else cell.alignment = { horizontal: 'left' };
+        });
+        
+        // Price is now in column 9
+        row.getCell(9).numFmt = '#,##0.00 "Birr"'; 
+        row.getCell(9).font = { bold: true };
+        
+        // Status is now in column 10
+        const statusCell = row.getCell(10);
+        if(s.status === 'Completed') statusCell.font = { color: { argb: 'FF16A34A' }, bold: true }; 
+        else if(s.status === 'Overdue') statusCell.font = { color: { argb: 'FFDC2626' }, bold: true }; 
+        else statusCell.font = { color: { argb: 'FFD97706' }, bold: true }; 
+        currentRow++;
+      });
+      // Adjusted column widths to fit new column
+      sheet.columns = [{ width: 12 }, { width: 20 }, { width: 10 }, { width: 18 }, { width: 15 }, { width: 15 }, { width: 18 }, { width: 8 }, { width: 15 }, { width: 12 }];
+      saveAs(new Blob([await workbook.xlsx.writeBuffer()]), `Sales_Report_${new Date().toISOString().split('T')[0]}.xlsx`);
+    }
+    Swal.fire({ icon: 'success', title: 'Report Generated', toast: true, timer: 3000 });
   };
 
   const handleProfileUpdate = async (e) => {
@@ -481,17 +632,14 @@ export const useAdminStocks = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ fullName: profile.name, email: profile.email })
       });
-
       if (response.status === 204) {
          setProfile({ name: profile.name, email: profile.email, id: loggedUser.id });
          localStorage.setItem("loggedInUser", JSON.stringify({ ...loggedUser, name: profile.name, email: profile.email }));
          Swal.fire('Success', 'Profile updated!', 'success');
          return;
       }
-
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || "Failed");
-      
       setProfile({ name: data.fullName, email: data.email, id: loggedUser.id });
       localStorage.setItem("loggedInUser", JSON.stringify({ ...loggedUser, name: data.fullName, email: data.email }));
       Swal.fire('Success', 'Profile updated!', 'success');
@@ -524,7 +672,7 @@ export const useAdminStocks = () => {
     activeView, setActiveView,
     isSidebarOpen, setIsSidebarOpen,
     searchTerm, setSearchTerm,
-    isLoading,
+    isLoading, 
     products, 
     currentProducts, 
     inventoryPage, setInventoryPage, totalInventoryPages,
@@ -546,7 +694,7 @@ export const useAdminStocks = () => {
     handleEditProduct,
     handleStockAdjustment,
     handleDelete,
-    handleDownloadExcel,
+    handleGenerateReport, 
     handleProfileUpdate,
     handlePasswordChange,
     handleLogout,

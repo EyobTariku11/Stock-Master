@@ -10,38 +10,40 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState(""); 
   const [isLoading, setIsLoading] = useState(false);
+  
+  // State for toggling password visibility
+  const [showPassword, setShowPassword] = useState(false);
 
   const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
-  // 🔍 Periodically check if the user is still ACTIVE
   const startStatusWatcher = (userId) => {
     if (window._statusCheckInterval) {
       clearInterval(window._statusCheckInterval);
     }
 
+    // Only start watcher if it's a real ID (not our hardcoded mock admin)
+    if (userId === "mock-admin-id") return;
+
     window._statusCheckInterval = setInterval(async () => {
       try {
         const res = await fetch(`https://localhost:7262/api/auth/check-status/${userId}`);
-        const data = await res.json();
-
-        if (!data.isActive) {
-          clearInterval(window._statusCheckInterval);
-          window._statusCheckInterval = null;
-
-          localStorage.removeItem("loggedInUser");
-
-          Swal.fire({
-            icon: "warning",
-            title: "Access Revoked",
-            text: "Your account has been deactivated by an admin.",
-          }).then(() => {
-            navigate("/login");
-          });
+        if (res.ok) {
+            const data = await res.json();
+            if (!data.isActive) {
+              clearInterval(window._statusCheckInterval);
+              window._statusCheckInterval = null;
+              localStorage.removeItem("loggedInUser");
+              Swal.fire({
+                icon: "warning",
+                title: "Access Revoked",
+                text: "Your account has been deactivated by an admin.",
+              }).then(() => navigate("/login"));
+            }
         }
       } catch (err) {
         console.error("Status check failed:", err);
       }
-    }, 5000); // checks every 5 seconds
+    }, 5000);
   };
 
   const onSubmit = async (e) => {
@@ -49,6 +51,7 @@ export default function Login() {
     setError("");
     setIsLoading(true);
 
+    // 1. Basic Validation
     if (!email || !password) {
       setError("Please fill in all fields.");
       setIsLoading(false);
@@ -61,6 +64,36 @@ export default function Login() {
       return;
     }
 
+    // ---------------------------------------------------------
+    // SPECIAL ADMIN BYPASS CHECK (Requested Logic)
+    // ---------------------------------------------------------
+    if (email === "Admin@gmail.com" && password === "123456") {
+        const adminUser = {
+            id: "mock-admin-id",
+            name: "System Admin",
+            email: email,
+            role: "Admin", // Force role to Admin
+            token: "mock-jwt-token"
+        };
+
+        localStorage.setItem("loggedInUser", JSON.stringify(adminUser));
+        
+        await Swal.fire({
+            title: "Login Successful!",
+            text: `Welcome back, Admin!`,
+            icon: "success",
+            confirmButtonText: "Continue",
+            timer: 1500,
+            showConfirmButton: false
+        });
+
+        setIsLoading(false);
+        navigate("/admin"); // Navigate directly to Admin Panel
+        return; // Stop here, do not call API
+    }
+    // ---------------------------------------------------------
+
+    // 2. Real API Call for all other users
     try {
       const response = await fetch("https://localhost:7262/api/auth/login", {
         method: "POST",
@@ -68,11 +101,35 @@ export default function Login() {
         body: JSON.stringify({ email, password })
       });
 
-      const data = await response.json();
+      const responseText = await response.text();
+      let data;
+
+      try {
+        data = JSON.parse(responseText);
+      } catch (err) {
+        data = null; 
+      }
 
       if (!response.ok) {
-        const message = data?.message || "Invalid email or password.";
-        throw new Error(message);
+        let serverMessage = "An error occurred.";
+
+        if (data && data.message) {
+            serverMessage = data.message;
+        } else if (responseText) {
+            serverMessage = responseText;
+        }
+
+        const lowerMsg = serverMessage.toLowerCase();
+
+        if (lowerMsg.includes("user not found")) {
+            throw new Error("User does not exist. Please check your email.");
+        } else if (lowerMsg.includes("incorrect password")) {
+            throw new Error("Incorrect password. Please try again.");
+        } else if (lowerMsg.includes("not active") || lowerMsg.includes("locked")) {
+            throw new Error("Your account is not active.");
+        } else {
+            throw new Error(serverMessage);
+        }
       }
 
       console.log("Login API response:", data);
@@ -81,17 +138,13 @@ export default function Login() {
         id: data.id || null,
         name: data.fullName || data.name || "User",
         email: data.email || email,
-        role: data.role || "Viewer",  // 👈 add role
+        role: data.role || "Viewer", 
         token: data.token || "fake-jwt-token"
       };
 
-      if (!user.id) {
-        throw new Error("User ID not returned by server.");
-      }
+      if (!user.id) throw new Error("User ID not returned by server.");
 
       localStorage.setItem("loggedInUser", JSON.stringify(user));
-
-      // ✅ Start watcher to catch immediate revoke
       startStatusWatcher(user.id);
 
       await Swal.fire({
@@ -99,25 +152,38 @@ export default function Login() {
         text: `Welcome back, ${user.name}!`,
         icon: "success",
         confirmButtonText: "Continue",
+        timer: 1500,
+        showConfirmButton: false
       });
 
-      // 🚀 ROLE-BASED REDIRECT HERE
-      if (user.role === "Admin") {
-        navigate("/admin");
+      // 3. Navigation based on Role from Database
+      const userRole = user.role ? user.role.toLowerCase() : "";
+
+      if (userRole === "admin") {
+        navigate("/admin", { replace: true });
+
       } else {
-        navigate("/stock");
+        navigate("/stock", { replace: true });
       }
 
     } catch (err) {
       console.error(err);
-      setError(err.message || "Failed to sign in.");
+      setError(err.message.replace(/^Error:\s*/, "") || "Failed to sign in.");
     } finally {
       setIsLoading(false);
     }
   };
 
-  const isEmailError = error && (error.toLowerCase().includes("email") || error.includes("credentials"));
-  const isPasswordError = error && (error.toLowerCase().includes("password") || error.includes("credentials"));
+  // Error highlighting logic
+  const isEmailError = error && (
+    error.toLowerCase().includes("user") || 
+    error.toLowerCase().includes("exist") ||
+    error.toLowerCase().includes("email")
+  );
+  
+  const isPasswordError = error && (
+    error.toLowerCase().includes("password")
+  );
 
   return (
     <div className="login-page-wrapper">
@@ -156,14 +222,26 @@ export default function Login() {
 
               <div className="input-group">
                 <label>Password</label>
-                <div className={`input-wrapper ${isPasswordError ? "error" : ""}`}>
+                <div className={`input-wrapper ${isPasswordError ? "error" : ""}`} style={{ position: 'relative' }}>
                   <span className="icon">🔒</span>
                   <input
-                    type="password"
+                    type={showPassword ? "text" : "password"}
                     placeholder="••••••••"
                     value={password}
+                    style={{ paddingRight: '40px' }}
                     onChange={(e) => { setPassword(e.target.value); setError(""); }}
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    style={{
+                      position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)',
+                      background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.2rem', color: '#6b7280', padding: 0
+                    }}
+                    title={showPassword ? "Hide Password" : "Show Password"}
+                  >
+                    {showPassword ? "👁️" : "👁️‍🗨️"}
+                  </button>
                 </div>
               </div>
 

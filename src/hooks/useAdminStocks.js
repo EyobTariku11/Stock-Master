@@ -113,6 +113,25 @@ export const useAdminStocks = () => {
     return () => clearInterval(interval);
   }, [navigate]);
 
+  // --- HELPER: Parse API Error ---
+  const parseApiError = async (response, defaultMsg) => {
+    try {
+        const data = await response.json();
+        // 1. Check for array of errors (Identity)
+        if (Array.isArray(data)) return data.join(" | ");
+        // 2. Check for standard object messages
+        if (data.message) return data.message;
+        if (data.title) return data.title;
+        // 3. Check for dictionary-style errors (FluentValidation or Identity)
+        if (data.errors && typeof data.errors === 'object') {
+             return Object.values(data.errors).flat().join(", ");
+        }
+        return defaultMsg;
+    } catch {
+        return defaultMsg;
+    }
+  };
+
   // --- 3. API FETCH FUNCTIONS ---
 
   const fetchProducts = async () => {
@@ -154,8 +173,17 @@ export const useAdminStocks = () => {
           daysRem = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
         }
 
-        const status = s.status || s.Status; 
+        let status = s.status || s.Status; 
         const isPaid = status === "Completed";
+
+        // Logic: Force Overdue if daysRem <= 0 and not paid
+        if (!isPaid && daysRem !== null) {
+            if (daysRem <= 0) {
+                status = "Overdue";
+            } else {
+                status = "Active";
+            }
+        }
 
         return {
           id: s.id || s.Id,
@@ -166,7 +194,6 @@ export const useAdminStocks = () => {
           rawDate: s.dateSold || s.DateSold,
           soldBy: s.soldBy || s.SoldBy,
           
-          // Mapped separately
           approvedBy: s.approvedBy || s.ApprovedBy || "-",
           paymentApprovedBy: s.paymentApprovedBy || s.PaymentApprovedBy || "-",
 
@@ -227,13 +254,12 @@ export const useAdminStocks = () => {
     const sale = salesLog.find(s => s.id === id);
     if (!sale || sale.isPaid) return;
 
-    // CONFIRMATION DIALOG
     const result = await Swal.fire({
       title: 'Confirm Payment',
       text: `Mark credit for ${sale.customerName} (${sale.total} Birr) as Paid?`,
       icon: 'question',
       showCancelButton: true,
-      confirmButtonColor: '#10b981', // Green color
+      confirmButtonColor: '#10b981', 
       cancelButtonColor: '#d33',
       confirmButtonText: 'Yes, Mark Paid',
       cancelButtonText: 'Cancel'
@@ -263,8 +289,12 @@ export const useAdminStocks = () => {
          fetchSales();
          return;
       }
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "Failed to mark as paid");
+      
+      if (!res.ok) {
+        const errMsg = await parseApiError(res, "Failed to mark as paid");
+        throw new Error(errMsg);
+      }
+
       Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Marked as Paid', showConfirmButton: false, timer: 1500 });
       fetchSales();
     } catch (err) { Swal.fire('Error', err.message, 'error'); }
@@ -341,7 +371,10 @@ export const useAdminStocks = () => {
           })
         });
   
-        if (!res.ok) throw new Error("Failed to add product");
+        if (!res.ok) {
+             const errMsg = await parseApiError(res, "Failed to add product");
+             throw new Error(errMsg);
+        }
   
         fetchProducts();
         Swal.fire("Success", `${name} added successfully.`, "success");
@@ -376,7 +409,10 @@ export const useAdminStocks = () => {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ Name: name, Category: cat || "Uncategorized", Price: parseFloat(price), MinStock: parseInt(minStock) || 10 })
         });
-        if (!res.ok) throw new Error("Failed to update details");
+        if (!res.ok) {
+             const errMsg = await parseApiError(res, "Failed to update details");
+             throw new Error(errMsg);
+        }
         fetchProducts();
         Swal.fire('Updated!', 'Product details saved.', 'success');
       } catch (err) { Swal.fire('Error', err.message, 'error'); }
@@ -390,7 +426,10 @@ export const useAdminStocks = () => {
       if (result.isConfirmed) {
         try {
           const res = await fetch(`https://localhost:7262/api/products/${id}`, { method: "DELETE" });
-          if (!res.ok) throw new Error("Failed to delete product");
+          if (!res.ok) {
+             const errMsg = await parseApiError(res, "Failed to delete product");
+             throw new Error(errMsg);
+          }
           fetchProducts();
           Swal.fire('Deleted!', 'Product removed.', 'success');
         } catch (err) { Swal.fire('Error', err.message, 'error'); }
@@ -466,8 +505,8 @@ export const useAdminStocks = () => {
             body: JSON.stringify(salePayload)
           });
           if (res.status === 204) { /* success */ } else if (!res.ok) {
-              const err = await res.json();
-              throw new Error(err.message || "Sale failed");
+              const errMsg = await parseApiError(res, "Sale failed");
+              throw new Error(errMsg);
           }
           Swal.fire({ icon: 'success', title: 'Sale Successful', timer: 2000, showConfirmButton: false });
           fetchProducts();
@@ -475,16 +514,20 @@ export const useAdminStocks = () => {
         } catch (err) { Swal.fire('Error', err.message, 'error'); }
       }
     } else {
+      // RESTOCK LOGIC
       const { value } = await Swal.fire({ title: `Restock ${product.name}`, input: 'number', inputLabel: 'Enter amount to add', confirmButtonText: 'Add Stock' });
       if (value && value > 0) {
         try {
-          const cleanProduct = { Name: product.name, Category: product.category, Price: product.price, MinStock: product.minStock, Stock: product.stock + parseInt(value) };
-          const res = await fetch(`https://localhost:7262/api/products/details/${product.id}`, {
+          const res = await fetch(`https://localhost:7262/api/products/${product.id}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(cleanProduct)
+            body: JSON.stringify({ NewStock: product.stock + parseInt(value) })
           });
-          if (res.status !== 204 && !res.ok) throw new Error("Failed to restock");
+
+          if (res.status !== 204 && !res.ok) {
+               const errMsg = await parseApiError(res, "Failed to restock");
+               throw new Error(errMsg);
+          }
           Swal.fire('Restocked!', `${value} items added.`, 'success');
           fetchProducts();
         } catch (err) { Swal.fire('Error', err.message, 'error'); }
@@ -495,31 +538,56 @@ export const useAdminStocks = () => {
   // --- REPORT GENERATOR ---
   const handleGenerateReport = async (reportType = 'sales') => {
     const workbook = new ExcelJS.Workbook();
-    const headerFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } }; 
+    
+    // --- Styling Constants ---
+    const headerFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } }; // Dark Slate
     const headerFont = { bold: true, color: { argb: 'FFFFFFFF' }, size: 12 };
-    const subHeaderFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } }; 
+    const subHeaderFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } }; // Light Gray
     
     if (reportType === 'inventory') {
+      // ===============================================
+      //       INVENTORY REPORT LOGIC
+      // ===============================================
       const sheet = workbook.addWorksheet('Current Inventory');
+
+      // 1. Title
       sheet.mergeCells('A1:G1');
       const titleCell = sheet.getCell('A1');
       titleCell.value = 'BEKTAR STOCK - INVENTORY AUDIT REPORT';
       titleCell.font = { size: 18, bold: true, color: { argb: 'FF1E293B' } };
       titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
       sheet.getRow(1).height = 30;
+
+      // 2. Executive Summary
       sheet.mergeCells('A3:C3');
       sheet.getCell('A3').value = "EXECUTIVE SUMMARY";
       sheet.getCell('A3').font = { bold: true, size: 11 };
       sheet.getCell('A3').fill = subHeaderFill;
+
+      // Calculations
       const totalAssetValue = products.reduce((acc, p) => acc + (p.price * p.stock), 0);
+      const currentDate = new Date().toLocaleDateString('en-US', { 
+        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' 
+      });
+
+      // Summary Rows
       sheet.getCell('A4').value = "Total Items:";
       sheet.getCell('B4').value = products.length;
+
       sheet.getCell('A5').value = "Total Asset Value:";
       sheet.getCell('B5').value = totalAssetValue;
       sheet.getCell('B5').numFmt = '#,##0.00 "Birr"';
+
       sheet.getCell('A6').value = "Low Stock Alerts:";
       sheet.getCell('B6').value = lowStockCount;
       sheet.getCell('B6').font = { color: { argb: 'FFDC2626' }, bold: true }; 
+
+      // --- ADDED DATE ROW HERE (Row 7) ---
+      sheet.getCell('A7').value = "As of Date:";
+      sheet.getCell('B7').value = currentDate;
+      sheet.getCell('B7').font = { italic: true, color: { argb: 'FF64748B' } };
+
+      // 3. Table Headers (Row 9)
       const headers = ["Product Name", "Category", "Unit Price", "Quantity", "Total Value", "Min Stock", "Status"];
       const headerRow = sheet.getRow(9);
       headerRow.values = headers;
@@ -530,20 +598,28 @@ export const useAdminStocks = () => {
         cell.border = { bottom: {style:'medium'} };
       });
       headerRow.height = 24;
+
+      // 4. Data Rows
       let currentRow = 10;
       products.forEach((p, index) => {
         const row = sheet.getRow(currentRow);
         const totalValue = p.price * p.stock;
+        
         row.values = [p.name, p.category, p.price, p.stock, totalValue, p.minStock, p.status];
+        
         const isEven = index % 2 === 0;
         row.eachCell((cell, colNum) => {
           if (isEven) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
           cell.border = { bottom: {style:'dotted', color: {argb: 'FFCBD5E1'}} };
+          
           if(colNum >= 3 && colNum <= 6) cell.alignment = { horizontal: 'center' };
           else cell.alignment = { horizontal: 'left' };
         });
+
         row.getCell(3).numFmt = '#,##0.00';
         row.getCell(5).numFmt = '#,##0.00 "Birr"';
+
+        // Conditional Formatting for Low Stock
         if (p.stock <= p.minStock) {
           row.getCell(7).font = { color: { argb: 'FFDC2626' }, bold: true }; 
           row.getCell(4).font = { color: { argb: 'FFDC2626' }, bold: true };
@@ -552,36 +628,68 @@ export const useAdminStocks = () => {
         }
         currentRow++;
       });
+
+      // Set Column Widths
       sheet.columns = [{ width: 30 }, { width: 20 }, { width: 15 }, { width: 12 }, { width: 20 }, { width: 12 }, { width: 15 }];
+      
+      // Save File
       saveAs(new Blob([await workbook.xlsx.writeBuffer()]), `Inventory_Report_${new Date().toISOString().split('T')[0]}.xlsx`);
 
     } else {
+      // ===============================================
+      //       SALES & CREDITS REPORT LOGIC
+      // ===============================================
       const sheet = workbook.addWorksheet('Sales Report');
-      const dataToExport = salesDateFilter ? filteredSales : salesLog;
-      sheet.mergeCells('A1:J1'); // Merging more cells to fit new column
+      
+      // 1. Determine Data Source
+      let dataToExport;
+      let reportTitle;
+      let fileNamePrefix;
+
+      if (reportType === 'credits_paid') {
+        dataToExport = salesLog.filter(s => s.salesType === 'Credit' && s.status === 'Completed');
+        if (creditDateFilter) {
+          dataToExport = dataToExport.filter(s => s.date === creditDateFilter);
+        }
+        reportTitle = 'BEKTAR STOCK - COMPLETED CREDIT SALES REPORT';
+        fileNamePrefix = 'Completed_Credits_Report';
+      } else {
+        dataToExport = salesDateFilter ? filteredSales : salesLog;
+        reportTitle = 'BEKTAR STOCK - SALES TRANSACTION REPORT';
+        fileNamePrefix = 'Sales_Report';
+      }
+
+      // 2. Title
+      sheet.mergeCells('A1:J1');
       const titleCell = sheet.getCell('A1');
-      titleCell.value = 'BEKTAR STOCK - SALES TRANSACTION REPORT';
+      titleCell.value = reportTitle;
       titleCell.font = { size: 18, bold: true, color: { argb: 'FF1E293B' } };
       titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
       sheet.getRow(1).height = 30;
+
+      // 3. Executive Summary
       sheet.mergeCells('A3:C3');
       sheet.getCell('A3').value = "EXECUTIVE SUMMARY";
       sheet.getCell('A3').font = { bold: true, size: 11 };
       sheet.getCell('A3').fill = subHeaderFill;
+      
       const totalPeriodRevenue = dataToExport.reduce((acc, s) => acc + s.total, 0);
       const cashSales = dataToExport.filter(s => s.salesType === 'Cash').reduce((acc, s) => acc + s.total, 0);
       const creditSales = dataToExport.filter(s => s.salesType === 'Credit').reduce((acc, s) => acc + s.total, 0);
+      
       sheet.getCell('A4').value = "Total Revenue:";
       sheet.getCell('B4').value = totalPeriodRevenue;
       sheet.getCell('B4').numFmt = '#,##0.00 "Birr"';
       sheet.getCell('B4').font = { bold: true, color: { argb: 'FF16A34A' } };
+      
       sheet.getCell('A5').value = "Total Transactions:";
       sheet.getCell('B5').value = dataToExport.length;
-      sheet.getCell('A6').value = "Cash vs Credit:";
+      
+      sheet.getCell('A6').value = "Breakdown:";
       sheet.getCell('B6').value = `Cash: ${cashSales.toLocaleString()} | Credit: ${creditSales.toLocaleString()}`;
       
-      // *** UPDATED HEADERS TO INCLUDE PAYMENT APPROVED BY ***
-      const headers = ["Date", "Product", "Type", "Customer", "Sold By", "Approved By", "Pmt Approved By", "Qty", "Price", "Status"];
+      // 4. Table Headers (Row 9)
+      const headers = ["Date", "Product", "Type", "Customer", "Sold By", "Created By", "Pmt Approved By", "Qty", "Revenue", "Status"];
       const headerRow = sheet.getRow(9);
       headerRow.values = headers;
       headerRow.eachCell((cell) => {
@@ -591,11 +699,24 @@ export const useAdminStocks = () => {
         cell.border = { bottom: {style:'medium'} };
       });
       headerRow.height = 24;
+
+      // 5. Data Rows
       let currentRow = 10;
       dataToExport.forEach((s, index) => {
         const row = sheet.getRow(currentRow);
-        // *** ADDED s.paymentApprovedBy TO THE VALUES ARRAY ***
-        row.values = [s.date, s.product, s.salesType, s.customerName, s.soldBy, s.approvedBy, s.paymentApprovedBy, s.quantity, s.total, s.status];
+        row.values = [
+          s.date, 
+          s.product, 
+          s.salesType, 
+          s.customerName, 
+          s.soldBy, 
+          s.approvedBy, 
+          s.paymentApprovedBy || '-', 
+          s.quantity, 
+          s.total, 
+          s.status
+        ];
+        
         const isEven = index % 2 === 0;
         row.eachCell((cell, colNum) => {
           if (isEven) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
@@ -604,24 +725,23 @@ export const useAdminStocks = () => {
           else cell.alignment = { horizontal: 'left' };
         });
         
-        // Price is now in column 9
         row.getCell(9).numFmt = '#,##0.00 "Birr"'; 
         row.getCell(9).font = { bold: true };
         
-        // Status is now in column 10
         const statusCell = row.getCell(10);
         if(s.status === 'Completed') statusCell.font = { color: { argb: 'FF16A34A' }, bold: true }; 
         else if(s.status === 'Overdue') statusCell.font = { color: { argb: 'FFDC2626' }, bold: true }; 
         else statusCell.font = { color: { argb: 'FFD97706' }, bold: true }; 
         currentRow++;
       });
-      // Adjusted column widths to fit new column
+      
       sheet.columns = [{ width: 12 }, { width: 20 }, { width: 10 }, { width: 18 }, { width: 15 }, { width: 15 }, { width: 18 }, { width: 8 }, { width: 15 }, { width: 12 }];
-      saveAs(new Blob([await workbook.xlsx.writeBuffer()]), `Sales_Report_${new Date().toISOString().split('T')[0]}.xlsx`);
+      
+      saveAs(new Blob([await workbook.xlsx.writeBuffer()]), `${fileNamePrefix}_${new Date().toISOString().split('T')[0]}.xlsx`);
     }
+    
     Swal.fire({ icon: 'success', title: 'Report Generated', toast: true, timer: 3000 });
   };
-
   const handleProfileUpdate = async (e) => {
     e.preventDefault();
     const loggedUser = JSON.parse(localStorage.getItem("loggedInUser"));
@@ -638,8 +758,13 @@ export const useAdminStocks = () => {
          Swal.fire('Success', 'Profile updated!', 'success');
          return;
       }
+      
+      if (!response.ok) {
+           const errMsg = await parseApiError(response, "Failed to update profile");
+           throw new Error(errMsg);
+      }
+
       const data = await response.json();
-      if (!response.ok) throw new Error(data.message || "Failed");
       setProfile({ name: data.fullName, email: data.email, id: loggedUser.id });
       localStorage.setItem("loggedInUser", JSON.stringify({ ...loggedUser, name: data.fullName, email: data.email }));
       Swal.fire('Success', 'Profile updated!', 'success');
@@ -657,7 +782,13 @@ export const useAdminStocks = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ currentPassword: passwords.current, newPassword: passwords.new })
       });
-      if (!response.ok) throw new Error("Failed to change password");
+      
+      if (!response.ok) {
+           // THIS IS THE CRITICAL CHANGE FOR SHOWING REAL ERRORS
+           const errMsg = await parseApiError(response, "Failed to change password");
+           throw new Error(errMsg);
+      }
+      
       setPasswords({ current: "", new: "", confirm: "" });
       Swal.fire('Success', 'Password changed!', 'success');
     } catch (err) { Swal.fire('Error', err.message, 'error'); }

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react"; 
 import { useAdminStocks } from "../hooks/useAdminStocks";
 import '../../css/Stock.css'; 
 
@@ -34,6 +34,11 @@ export default function AdminStocks() {
     handleLogout,
     handleTogglePaid
   } = useAdminStocks();
+
+  // --- LOCAL STATE FOR PASSWORD VISIBILITY TOGGLE ---
+  const [showCurrentPass, setShowCurrentPass] = useState(false);
+  const [showNewPass, setShowNewPass] = useState(false);
+  const [showConfirmPass, setShowConfirmPass] = useState(false);
 
   const renderPagination = (currentPage, totalPages, setPage) => (
     totalPages > 1 && (
@@ -87,8 +92,15 @@ export default function AdminStocks() {
     <div className="dashboard-container">
       <header className="top-header">
         <div className="header-left">
+          {/* HAMBURGER / X TOGGLE */}
           <button className="hamburger-btn" onClick={() => setIsSidebarOpen(!isSidebarOpen)}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+            {isSidebarOpen ? (
+              // X Icon (Close)
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            ) : (
+              // Hamburger Icon (Open)
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+            )}
           </button>
           <div className="brand-logo"><span className="logo-icon">📦</span>  BektarStock</div>
         </div>
@@ -226,7 +238,7 @@ export default function AdminStocks() {
                             <th className="text-center">Type</th>
                             <th className="text-center">Customer</th>
                             <th className="text-center">Sold By</th>
-                            <th className="text-center">Approved By</th>
+                            <th className="text-center">Created By</th>
                             <th className="text-center">Qty</th>
                             <th className="text-right">Revenue</th>
                             <th className="text-center">Status</th>
@@ -265,14 +277,15 @@ export default function AdminStocks() {
               <div className="fade-in">
                 <div className="section-header">
                   <div><h2>Credit Sales Management</h2></div>
-                  <div className="header-actions" style={{ display: 'flex', gap: '10px' }}>
+                  <div className="header-actions">
 
                     <div style={{ display: 'flex', gap: '5px', background: '#e5e7eb', padding: '4px', borderRadius: '8px' }}>
                       <button onClick={() => { setCreditViewMode('active'); setCreditPage(1); }}
                         style={{
                           padding: '6px 12px', border: 'none', borderRadius: '6px', cursor: 'pointer', transition: '0.2s',
                           background: creditViewMode === 'active' ? 'white' : 'transparent',
-                          color: creditViewMode === 'active' ? '#4f46e5' : '#6b7280', fontWeight: '600', boxShadow: creditViewMode === 'active' ? '0 1px 2px rgba(0,0,0,0.1)' : 'none'
+                          color: creditViewMode === 'active' ? '#4f46e5' : '#6b7280', fontWeight: '600', 
+                          boxShadow: creditViewMode === 'active' ? '0 1px 2px rgba(0,0,0,0.1)' : 'none'
                         }}>
                         Active (Unpaid)
                       </button>
@@ -280,8 +293,9 @@ export default function AdminStocks() {
                       <button onClick={() => { setCreditViewMode('overdue'); setCreditPage(1); }}
                         style={{
                           padding: '6px 12px', border: 'none', borderRadius: '6px', cursor: 'pointer', transition: '0.2s',
-                          background: creditViewMode === 'overdue' ? '#fee2e2' : 'transparent',
-                          color: creditViewMode === 'overdue' ? '#b91c1c' : '#6b7280', fontWeight: '600', boxShadow: creditViewMode === 'overdue' ? '0 1px 2px rgba(0,0,0,0.1)' : 'none'
+                          background: creditViewMode === 'overdue' ? 'white' : 'transparent',
+                          color: creditViewMode === 'overdue' ? '#b91c1c' : '#6b7280', fontWeight: '600', 
+                          boxShadow: creditViewMode === 'overdue' ? '0 1px 2px rgba(0,0,0,0.1)' : 'none'
                         }}>
                         Overdue ⚠️
                       </button>
@@ -289,8 +303,9 @@ export default function AdminStocks() {
                       <button onClick={() => { setCreditViewMode('paid'); setCreditPage(1); }}
                         style={{
                           padding: '6px 12px', border: 'none', borderRadius: '6px', cursor: 'pointer', transition: '0.2s',
-                          background: creditViewMode === 'paid' ? '#dcfce7' : 'transparent',
-                          color: creditViewMode === 'paid' ? '#166534' : '#6b7280', fontWeight: '600', boxShadow: creditViewMode === 'paid' ? '0 1px 2px rgba(0,0,0,0.1)' : 'none'
+                          background: creditViewMode === 'paid' ? 'white' : 'transparent',
+                          color: creditViewMode === 'paid' ? '#166534' : '#6b7280', fontWeight: '600', 
+                          boxShadow: creditViewMode === 'paid' ? '0 1px 2px rgba(0,0,0,0.1)' : 'none'
                         }}>
                         Completed (Paid) ✅
                       </button>
@@ -300,6 +315,17 @@ export default function AdminStocks() {
                       <span style={{ marginRight: '5px' }}>📅</span>
                       <input type="date" style={{ border: 'none', outline: 'none' }} value={creditDateFilter} onChange={(e) => { setCreditDateFilter(e.target.value); setCreditPage(1); }} />
                     </div>
+
+                    {creditViewMode === 'paid' && (
+                      <button 
+                        className="secondary-btn" 
+                        style={{ padding: '6px 15px', height: '38px', fontSize: '0.9rem', display: 'flex', alignItems: 'center', whiteSpace: 'nowrap' }} 
+                        onClick={() => handleGenerateReport('credits_paid')}
+                      >
+                        ⬇ Sales Report
+                      </button>
+                    )}
+
                   </div>
                 </div>
 
@@ -313,47 +339,73 @@ export default function AdminStocks() {
                   </div>
                   <div className="card-body">
                     <div className="table-responsive">
-                      <table className="custom-table">
+                      <table className="custom-table fixed-layout-table">
                         <thead>
                           <tr>
-                            <th className="text-left">Date</th>
-                            <th className="text-left">Product</th>
-                            <th className="text-center">Customer</th>
-                            <th className="text-center">Qty</th>
-                            <th className="text-center">Days Left</th>
-                            <th className="text-center">Status</th>
-                            {creditViewMode === 'paid' && <th className="text-center">Payment Approved By</th>}
-                            <th className="text-center">Mark Paid</th>
+                            <th className="text-left" style={{ width: '12%' }}>Date</th>
+                            <th className="text-left" style={{ width: '18%' }}>Product</th>
+                            <th className="text-center" style={{ width: '15%' }}>Customer</th>
+                            <th className="text-center" style={{ width: '10%' }}>Sold By</th> 
+                            <th className="text-center" style={{ width: '10%' }}>Created By</th>
+                            <th className="text-center" style={{ width: '7%' }}>Qty</th>
+                            
+                            {/* FIXED WIDTH FOR VARIANT COLUMN */}
+                            <th className="text-center" style={{ width: '10%' }}>
+                              {creditViewMode === 'paid' ? 'Revenue' : 'Days Left'}
+                            </th>
+                            
+                            <th className="text-center" style={{ width: '10%' }}>Status</th>
+                            
+                            {/* FIXED WIDTH FOR ACTION COLUMN */}
+                            <th className="text-center" style={{ width: '8%' }}>
+                              {creditViewMode === 'paid' ? 'Approved By' : 'Mark Paid'}
+                            </th>
                           </tr>
                         </thead>
                         <tbody>
                           {currentCreditSales.length > 0 ? (
                             currentCreditSales.map((sale) => (
                               <tr key={sale.id}>
-                                <td>{sale.date}</td>
-                                <td>{sale.product}</td>
-                                <td>{sale.customerName}</td>
-                                <td>{sale.quantity}</td>
-                                <td>{sale.daysRemaining !== null ? sale.daysRemaining : '-'}</td>
-                                <td>
+                                <td className="text-left text-ellipsis" title={sale.date}>{sale.date}</td>
+                                <td className="text-left font-weight-600 text-ellipsis" title={sale.product}>{sale.product}</td>
+                                <td className="text-center text-ellipsis" title={sale.customerName}>{sale.customerName}</td>
+                                <td className="text-center text-ellipsis" title={sale.soldBy}>{sale.soldBy || '-'}</td>
+                                <td className="text-center text-ellipsis" title={sale.approvedBy}>{sale.approvedBy}</td>
+                                <td className="text-center">{sale.quantity}</td>
+
+                                {creditViewMode === 'paid' ? (
+                                  <td className="text-center text-success font-weight-bold">
+                                    {sale.total ? sale.total.toLocaleString() : '0'}
+                                  </td>
+                                ) : (
+                                  <td className="text-center">
+                                    {sale.daysRemaining !== null ? sale.daysRemaining : '-'}
+                                  </td>
+                                )}
+
+                                <td className="text-center">
                                   <span style={{ fontWeight: 'bold', color: sale.status === 'Completed' ? 'green' : sale.status === 'Overdue' ? 'red' : 'orange' }}>
                                     {sale.status}
                                   </span>
                                 </td>
-                                {creditViewMode === 'paid' && <td className="text-center">{sale.paymentApprovedBy}</td>}
-                                <td className="text-center">
-                                  <input
-                                    type="checkbox"
-                                    checked={sale.isPaid}
-                                    disabled={sale.isPaid}
-                                    onChange={() => handleTogglePaid(sale.id)}
-                                    style={{ cursor: sale.isPaid ? 'not-allowed' : 'pointer' }}
-                                  />
-                                </td>
+
+                                {creditViewMode === 'paid' ? (
+                                  <td className="text-center text-ellipsis" title={sale.paymentApprovedBy}>{sale.paymentApprovedBy}</td>
+                                ) : (
+                                  <td className="text-center">
+                                    <input
+                                      type="checkbox"
+                                      checked={sale.isPaid}
+                                      disabled={sale.isPaid}
+                                      onChange={() => handleTogglePaid(sale.id)}
+                                      style={{ cursor: sale.isPaid ? 'not-allowed' : 'pointer' }}
+                                    />
+                                  </td>
+                                )}
                               </tr>
                             ))
                           ) : (
-                            <tr><td colSpan={creditViewMode === 'paid' ? "8" : "7"} className="text-center">No credit sales found.</td></tr>
+                            <tr><td colSpan="9" className="text-center">No credit sales found.</td></tr>
                           )}
                         </tbody>
                       </table>
@@ -383,9 +435,90 @@ export default function AdminStocks() {
                     <div className="card-header-simple"><h3>Change Password</h3></div>
                     <form onSubmit={handlePasswordChange}>
                       <div className="card-body">
-                        <div className="form-group"><label>Current Password</label><input type="password" className="form-input" value={passwords.current} onChange={(e) => setPasswords({ ...passwords, current: e.target.value })} /></div>
-                        <div className="form-group"><label>New Password</label><input type="password" className="form-input" value={passwords.new} onChange={(e) => setPasswords({ ...passwords, new: e.target.value })} /></div>
-                        <div className="form-group"><label>Confirm Password</label><input type="password" className="form-input" value={passwords.confirm} onChange={(e) => setPasswords({ ...passwords, confirm: e.target.value })} /></div>
+                        {/* CURRENT PASSWORD */}
+                        <div className="form-group" style={{ position: 'relative' }}>
+                          <label>Current Password</label>
+                          <input 
+                            type={showCurrentPass ? "text" : "password"} 
+                            className="form-input" 
+                            style={{ paddingRight: '40px' }}
+                            value={passwords.current} 
+                            onChange={(e) => setPasswords({ ...passwords, current: e.target.value })} 
+                          />
+                          <button 
+                            type="button" 
+                            onClick={() => setShowCurrentPass(!showCurrentPass)}
+                            style={{
+                              position: 'absolute',
+                              right: '10px',
+                              top: '38px',
+                              background: 'none',
+                              border: 'none',
+                              cursor: 'pointer',
+                              color: '#6b7280',
+                              fontSize: '22px', 
+                            }}
+                          >
+                            {showCurrentPass ? '👁️' : '👁️‍🗨️'}
+                          </button>
+                        </div>
+
+                        {/* NEW PASSWORD */}
+                        <div className="form-group" style={{ position: 'relative' }}>
+                          <label>New Password</label>
+                          <input 
+                            type={showNewPass ? "text" : "password"} 
+                            className="form-input" 
+                            style={{ paddingRight: '40px' }}
+                            value={passwords.new} 
+                            onChange={(e) => setPasswords({ ...passwords, new: e.target.value })} 
+                          />
+                          <button 
+                            type="button" 
+                            onClick={() => setShowNewPass(!showNewPass)}
+                            style={{
+                              position: 'absolute',
+                              right: '10px',
+                              top: '38px',
+                              background: 'none',
+                              border: 'none',
+                              cursor: 'pointer',
+                              color: '#6b7280',
+                              fontSize: '22px', 
+                            }}
+                          >
+                             {showNewPass ? '👁️' : '👁️‍🗨️'}
+                          </button>
+                        </div>
+
+                        {/* CONFIRM PASSWORD */}
+                        <div className="form-group" style={{ position: 'relative' }}>
+                          <label>Confirm Password</label>
+                          <input 
+                            type={showConfirmPass ? "text" : "password"} 
+                            className="form-input" 
+                            style={{ paddingRight: '40px' }}
+                            value={passwords.confirm} 
+                            onChange={(e) => setPasswords({ ...passwords, confirm: e.target.value })} 
+                          />
+                          <button 
+                            type="button" 
+                            onClick={() => setShowConfirmPass(!showConfirmPass)}
+                            style={{
+                              position: 'absolute',
+                              right: '10px',
+                              top: '38px',
+                              background: 'none',
+                              border: 'none',
+                              cursor: 'pointer',
+                              color: '#6b7280',
+                              fontSize: '22px', 
+                            }}
+                            
+                          >
+                             {showConfirmPass ? '👁️' : '👁️‍🗨️'}
+                          </button>
+                        </div>
                       </div>
                       <div className="card-footer"><button type="submit" className="primary-btn warning">Change Password</button></div>
                     </form>

@@ -1,6 +1,7 @@
-import React, { useState } from "react"; 
+import React, { useState, useEffect } from "react";
 import { useAdminStocks } from "../hooks/useAdminStocks";
-import '../../css/Stock.css'; 
+import Swal from 'sweetalert2'; 
+import '../../css/Stock.css';
 
 export default function AdminStocks() {
   const {
@@ -40,6 +41,22 @@ export default function AdminStocks() {
   const [showNewPass, setShowNewPass] = useState(false);
   const [showConfirmPass, setShowConfirmPass] = useState(false);
 
+  // --- FIX: SYNC PROFILE WITH SESSION STORAGE ---
+  useEffect(() => {
+    // 1. Read the user from sessionStorage (Saved during Login)
+    const storedUser = JSON.parse(sessionStorage.getItem("loggedInUser") || "{}");
+
+    // 2. If we found a user name, update the profile state
+    if (storedUser.name) {
+      setProfile(prev => ({
+        ...prev,
+        name: storedUser.name,
+        email: storedUser.email || prev.email,
+        role: storedUser.role || "User"
+      }));
+    }
+  }, [setProfile]);
+
   const renderPagination = (currentPage, totalPages, setPage) => (
     totalPages > 1 && (
       <div className="pagination-container">
@@ -51,6 +68,29 @@ export default function AdminStocks() {
       </div>
     )
   );
+
+  // --- LOGOUT CONFIRMATION WRAPPER ---
+  const onLogoutClick = () => {
+    Swal.fire({
+      title: 'Sign Out?',
+      text: "Are you sure you want to end your session?",
+      icon: 'warning',
+      position: 'center', // Explicitly request center positioning
+      showCancelButton: true,
+      confirmButtonColor: '#d33', // Red for logout action
+      cancelButtonColor: '#3085d6', // Blue for cancel
+      confirmButtonText: 'Yes, Logout',
+      cancelButtonText: 'Stay Logged In',
+      // Ensure the popup doesn't inherit weird margins
+      customClass: {
+        popup: 'swal-center-force' 
+      }
+    }).then((result) => {
+      if (result.isConfirmed) {
+        handleLogout(); // Call the actual logout from the hook
+      }
+    });
+  };
 
   // --- ULTRA-MODERN "APP LAUNCH" LOADER ---
   if (isLoading) {
@@ -90,6 +130,22 @@ export default function AdminStocks() {
 
   return (
     <div className="dashboard-container">
+      {/* 
+         --- CSS OVERRIDE FOR SWEETALERT CENTER POSITIONING --- 
+         This ensures all Swals (Logout, Delete, Edit, etc.) appear in the middle.
+      */}
+      <style>{`
+        .swal2-container {
+          display: flex !important;
+          align-items: center !important;
+          justify-content: center !important;
+          z-index: 100000 !important;
+        }
+        .swal2-popup {
+          margin: auto !important;
+        }
+      `}</style>
+
       <header className="top-header">
         <div className="header-left">
           {/* HAMBURGER / X TOGGLE */}
@@ -113,11 +169,17 @@ export default function AdminStocks() {
               </span>
             )}
           </div>
+
+          {/* --- FIX: DISPLAY ACTUAL USER NAME AND ROLE --- */}
           <div className="admin-profile">
-            <div className="text-info"><span className="name">{profile.name}</span><span className="role">Manager</span></div>
-            <div className="avatar">{profile.name.charAt(0)}</div>
+            <div className="text-info">
+              <span className="name">{profile.name || "User"}</span>
+              <span className="role">{profile.role || "Staff"}</span>
+            </div>
+            <div className="avatar">{profile.name ? profile.name.charAt(0) : "U"}</div>
           </div>
-          <button className="header-logout-btn" onClick={handleLogout} title="Logout">
+
+          <button className="header-logout-btn" onClick={onLogoutClick} title="Logout">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
           </button>
         </div>

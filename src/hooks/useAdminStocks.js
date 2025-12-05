@@ -29,9 +29,9 @@ export const useAdminStocks = () => {
   const [creditDateFilter, setCreditDateFilter] = useState("");
   const [creditViewMode, setCreditViewMode] = useState("active"); 
 
-  // User Profile
+  // User Profile - FIXED: Using sessionStorage
   const [profile, setProfile] = useState(() => {
-    const storedUser = localStorage.getItem("loggedInUser");
+    const storedUser = sessionStorage.getItem("loggedInUser");
     return storedUser
       ? JSON.parse(storedUser)
       : { name: "Stock Manager", email: "manager@bektarstock.com", status: "active" };
@@ -39,13 +39,14 @@ export const useAdminStocks = () => {
 
   const [passwords, setPasswords] = useState({ current: "", new: "", confirm: "" });
 
+  // Alerts - FIXED: Using sessionStorage so alerts are per-session
   const [acknowledgedIds, setAcknowledgedIds] = useState(() => {
-    const saved = localStorage.getItem("acknowledgedAlerts");
+    const saved = sessionStorage.getItem("acknowledgedAlerts");
     return saved ? JSON.parse(saved) : [];
   });
 
   useEffect(() => {
-    localStorage.setItem("acknowledgedAlerts", JSON.stringify(acknowledgedIds));
+    sessionStorage.setItem("acknowledgedAlerts", JSON.stringify(acknowledgedIds));
   }, [acknowledgedIds]);
 
   // --- 2. INITIAL FETCH & LISTENERS ---
@@ -87,7 +88,8 @@ export const useAdminStocks = () => {
   // --- AUTH STATUS CHECKER ---
   useEffect(() => {
     const checkStatus = async () => {
-      const userStr = localStorage.getItem("loggedInUser");
+      // FIXED: using sessionStorage
+      const userStr = sessionStorage.getItem("loggedInUser");
       if (!userStr) return;
 
       const user = JSON.parse(userStr);
@@ -100,7 +102,7 @@ export const useAdminStocks = () => {
         if (res.ok) {
             const data = await res.json();
             if (data.isActive === false) { 
-              localStorage.removeItem("loggedInUser");
+              sessionStorage.removeItem("loggedInUser");
               Swal.fire({ icon: "error", title: "Access Revoked", text: "Your account has been deactivated.", allowOutsideClick: false })
                 .then(() => navigate("/login"));
             }
@@ -280,7 +282,10 @@ export const useAdminStocks = () => {
 
       const res = await fetch(`https://localhost:7262/api/sales/mark-paid/${id}`, {
         method: 'PUT',
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "userName": profile.name || "Unknown"
+        },
         body: JSON.stringify(payload)
       });
   
@@ -361,7 +366,10 @@ export const useAdminStocks = () => {
       try {
         const res = await fetch("https://localhost:7262/api/products", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { 
+            "Content-Type": "application/json",
+            "userName": profile.name || "Unknown"
+          },
           body: JSON.stringify({
             Name: name,
             Category: cat || "Uncategorized",
@@ -406,7 +414,10 @@ export const useAdminStocks = () => {
       try {
         const res = await fetch(`https://localhost:7262/api/products/details/${product.id}`, {
           method: "PUT",
-          headers: { "Content-Type": "application/json" },
+          headers: { 
+            "Content-Type": "application/json",
+            "userName": profile.name || "Unknown"
+          },
           body: JSON.stringify({ Name: name, Category: cat || "Uncategorized", Price: parseFloat(price), MinStock: parseInt(minStock) || 10 })
         });
         if (!res.ok) {
@@ -425,7 +436,12 @@ export const useAdminStocks = () => {
     }).then(async (result) => {
       if (result.isConfirmed) {
         try {
-          const res = await fetch(`https://localhost:7262/api/products/${id}`, { method: "DELETE" });
+          const res = await fetch(`https://localhost:7262/api/products/${id}`, { 
+            method: "DELETE",
+            headers: {
+              "userName": profile.name || "Unknown"
+            }
+          });
           if (!res.ok) {
              const errMsg = await parseApiError(res, "Failed to delete product");
              throw new Error(errMsg);
@@ -501,7 +517,10 @@ export const useAdminStocks = () => {
           };
           const res = await fetch("https://localhost:7262/api/sales", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { 
+              "Content-Type": "application/json",
+              "userName": profile.name || "Unknown"
+            },
             body: JSON.stringify(salePayload)
           });
           if (res.status === 204) { /* success */ } else if (!res.ok) {
@@ -520,7 +539,10 @@ export const useAdminStocks = () => {
         try {
           const res = await fetch(`https://localhost:7262/api/products/${product.id}`, {
             method: "PUT",
-            headers: { "Content-Type": "application/json" },
+            headers: { 
+              "Content-Type": "application/json",
+              "userName": profile.name || "Unknown"
+            },
             body: JSON.stringify({ NewStock: product.stock + parseInt(value) })
           });
 
@@ -739,12 +761,33 @@ export const useAdminStocks = () => {
       
       saveAs(new Blob([await workbook.xlsx.writeBuffer()]), `${fileNamePrefix}_${new Date().toISOString().split('T')[0]}.xlsx`);
     }
+
+    // --- LOGGING THE ACTION ---
+    // This sends the "Eyob generated report" action to the backend
+    try {
+      await fetch("https://localhost:7262/api/audit/log-client-action", {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json", 
+          "userName": profile.name || "Unknown" // Sends the current user's name
+        },
+        body: JSON.stringify({
+          UserName: profile.name || "Unknown", // Send in body as per your C# implementation
+          Action: "Report Generated",
+          Details: `Generated ${reportType} report.`
+        })
+      });
+    } catch (logErr) {
+      console.error("Failed to log report generation", logErr);
+    }
     
     Swal.fire({ icon: 'success', title: 'Report Generated', toast: true, timer: 3000 });
   };
+  
   const handleProfileUpdate = async (e) => {
     e.preventDefault();
-    const loggedUser = JSON.parse(localStorage.getItem("loggedInUser"));
+    // FIXED: using sessionStorage
+    const loggedUser = JSON.parse(sessionStorage.getItem("loggedInUser"));
     if (!loggedUser) return Swal.fire('Error', 'User not found.', 'error');
     try {
       const response = await fetch(`https://localhost:7262/api/auth/update-profile/${loggedUser.id}`, {
@@ -754,7 +797,8 @@ export const useAdminStocks = () => {
       });
       if (response.status === 204) {
          setProfile({ name: profile.name, email: profile.email, id: loggedUser.id });
-         localStorage.setItem("loggedInUser", JSON.stringify({ ...loggedUser, name: profile.name, email: profile.email }));
+         // FIXED: using sessionStorage
+         sessionStorage.setItem("loggedInUser", JSON.stringify({ ...loggedUser, name: profile.name, email: profile.email }));
          Swal.fire('Success', 'Profile updated!', 'success');
          return;
       }
@@ -766,7 +810,8 @@ export const useAdminStocks = () => {
 
       const data = await response.json();
       setProfile({ name: data.fullName, email: data.email, id: loggedUser.id });
-      localStorage.setItem("loggedInUser", JSON.stringify({ ...loggedUser, name: data.fullName, email: data.email }));
+      // FIXED: using sessionStorage
+      sessionStorage.setItem("loggedInUser", JSON.stringify({ ...loggedUser, name: data.fullName, email: data.email }));
       Swal.fire('Success', 'Profile updated!', 'success');
     } catch (err) { Swal.fire('Error', err.message, 'error'); }
   };
@@ -774,7 +819,8 @@ export const useAdminStocks = () => {
   const handlePasswordChange = async (e) => {
     e.preventDefault();
     if (passwords.new !== passwords.confirm) return Swal.fire('Error', 'Passwords mismatch', 'error');
-    const loggedUser = JSON.parse(localStorage.getItem("loggedInUser"));
+    // FIXED: using sessionStorage
+    const loggedUser = JSON.parse(sessionStorage.getItem("loggedInUser"));
     if (!loggedUser) return;
     try {
       const response = await fetch(`https://localhost:7262/api/auth/change-password/${loggedUser.id}`, {
@@ -784,7 +830,6 @@ export const useAdminStocks = () => {
       });
       
       if (!response.ok) {
-           // THIS IS THE CRITICAL CHANGE FOR SHOWING REAL ERRORS
            const errMsg = await parseApiError(response, "Failed to change password");
            throw new Error(errMsg);
       }
@@ -795,10 +840,14 @@ export const useAdminStocks = () => {
   };
 
   const handleLogout = () => {
-    Swal.fire({ title: 'Sign Out?', icon: 'question', showCancelButton: true, confirmButtonText: 'Log Out' })
-      .then((res) => { if (res.isConfirmed) { localStorage.removeItem("loggedInUser"); navigate('/login'); } });
+    // FIXED: using sessionStorage
+    sessionStorage.removeItem("loggedInUser");
+    if (window._statusCheckInterval) {
+      clearInterval(window._statusCheckInterval);
+      window._statusCheckInterval = null;
+    }
+    navigate("/login", { replace: true });
   };
-
   return {
     activeView, setActiveView,
     isSidebarOpen, setIsSidebarOpen,

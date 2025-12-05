@@ -10,40 +10,61 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState(""); 
   const [isLoading, setIsLoading] = useState(false);
-  
-  // State for toggling password visibility
   const [showPassword, setShowPassword] = useState(false);
 
   const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
-  const startStatusWatcher = (userId) => {
+  // --- FORCE LOGOUT HELPER ---
+  const forceLogout = (message) => {
     if (window._statusCheckInterval) {
       clearInterval(window._statusCheckInterval);
+      window._statusCheckInterval = null;
     }
+    // Remove session
+    sessionStorage.removeItem("loggedInUser");
+    
+    Swal.fire({
+      icon: "warning",
+      title: "Access Revoked",
+      text: message,
+      allowOutsideClick: false,
+      confirmButtonText: "Return to Login"
+    }).then(() => {
+      // Force navigation to login and reload to clear states
+      navigate("/login");
+      window.location.reload(); 
+    });
+  };
 
-    // Only start watcher if it's a real ID (not our hardcoded mock admin)
-    if (userId === "mock-admin-id") return;
+  // --- STATUS WATCHER ---
+  const startStatusWatcher = (userId) => {
+    if (window._statusCheckInterval) clearInterval(window._statusCheckInterval);
 
     window._statusCheckInterval = setInterval(async () => {
       try {
         const res = await fetch(`https://localhost:7262/api/auth/check-status/${userId}`);
+
+        // CASE 1: User Deleted (404) or Token Invalid (401)
+        if (res.status === 404) {
+           forceLogout("Your account no longer exists.");
+           return;
+        }
+        if (res.status === 401) {
+           forceLogout("Session expired or invalid.");
+           return;
+        }
+
+        // CASE 2: User Exists, check if Active
         if (res.ok) {
-            const data = await res.json();
-            if (!data.isActive) {
-              clearInterval(window._statusCheckInterval);
-              window._statusCheckInterval = null;
-              localStorage.removeItem("loggedInUser");
-              Swal.fire({
-                icon: "warning",
-                title: "Access Revoked",
-                text: "Your account has been deactivated by an admin.",
-              }).then(() => navigate("/login"));
-            }
+          const data = await res.json();
+          if (!data.isActive) {
+            forceLogout("Your account has been deactivated by an admin.");
+          }
         }
       } catch (err) {
         console.error("Status check failed:", err);
       }
-    }, 5000);
+    }, 5000); // Checks every 5 seconds
   };
 
   const onSubmit = async (e) => {
@@ -51,7 +72,6 @@ export default function Login() {
     setError("");
     setIsLoading(true);
 
-    // 1. Basic Validation
     if (!email || !password) {
       setError("Please fill in all fields.");
       setIsLoading(false);
@@ -64,37 +84,8 @@ export default function Login() {
       return;
     }
 
-    // ---------------------------------------------------------
-    // SPECIAL ADMIN BYPASS CHECK (Requested Logic)
-    // ---------------------------------------------------------
-    if (email === "Admin@gmail.com" && password === "123456") {
-        const adminUser = {
-            id: "mock-admin-id",
-            name: "System Admin",
-            email: email,
-            role: "Admin", // Force role to Admin
-            token: "mock-jwt-token"
-        };
-
-        localStorage.setItem("loggedInUser", JSON.stringify(adminUser));
-        
-        await Swal.fire({
-            title: "Login Successful!",
-            text: `Welcome back, Admin!`,
-            icon: "success",
-            confirmButtonText: "Continue",
-            timer: 1500,
-            showConfirmButton: false
-        });
-
-        setIsLoading(false);
-        navigate("/admin"); // Navigate directly to Admin Panel
-        return; // Stop here, do not call API
-    }
-    // ---------------------------------------------------------
-
-    // 2. Real API Call for all other users
     try {
+      // 1. Login API Call
       const response = await fetch("https://localhost:7262/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -103,68 +94,60 @@ export default function Login() {
 
       const responseText = await response.text();
       let data;
-
       try {
         data = JSON.parse(responseText);
-      } catch (err) {
-        data = null; 
+      } catch {
+        data = null;
       }
 
       if (!response.ok) {
-        let serverMessage = "An error occurred.";
-
-        if (data && data.message) {
-            serverMessage = data.message;
-        } else if (responseText) {
-            serverMessage = responseText;
-        }
-
-        const lowerMsg = serverMessage.toLowerCase();
-
-        if (lowerMsg.includes("user not found")) {
-            throw new Error("User does not exist. Please check your email.");
-        } else if (lowerMsg.includes("incorrect password")) {
-            throw new Error("Incorrect password. Please try again.");
-        } else if (lowerMsg.includes("not active") || lowerMsg.includes("locked")) {
-            throw new Error("Your account is not active.");
-        } else {
-            throw new Error(serverMessage);
-        }
+        let serverMessage = data?.message || responseText || "An error occurred.";
+        throw new Error(serverMessage);
       }
 
-      console.log("Login API response:", data);
-
+      // 2. Prepare User Object
+      const roleFromDB = data.role || "Viewer";
+      
       const user = {
         id: data.id || null,
         name: data.fullName || data.name || "User",
         email: data.email || email,
-        role: data.role || "Viewer", 
+        role: roleFromDB, 
         token: data.token || "fake-jwt-token"
       };
 
       if (!user.id) throw new Error("User ID not returned by server.");
 
-      localStorage.setItem("loggedInUser", JSON.stringify(user));
-      startStatusWatcher(user.id);
+      // 3. Save to SessionStorage (Using sessionStorage for Tab Isolation)
+      sessionStorage.setItem("loggedInUser", JSON.stringify(user));
 
-      await Swal.fire({
+      // 4. Role Check
+      const roleLower = String(user.role || "").toLowerCase().trim();
+      const isAuthorizedAdmin = 
+        roleLower === "admin" || 
+        roleLower === "superadmin" || 
+        roleLower === "super admin";
+
+      // 5. Start watcher only if NOT an admin
+      if (!isAuthorizedAdmin) {
+        startStatusWatcher(user.id);
+      }
+
+      // 6. Alert and Navigate
+      Swal.fire({
         title: "Login Successful!",
         text: `Welcome back, ${user.name}!`,
         icon: "success",
-        confirmButtonText: "Continue",
         timer: 1500,
         showConfirmButton: false
+      }).then(() => {
+        // Navigation Logic
+        if (isAuthorizedAdmin) {
+          navigate("/admin", { replace: true });
+        } else {
+          navigate("/stock", { replace: true });
+        }
       });
-
-      // 3. Navigation based on Role from Database
-      const userRole = user.role ? user.role.toLowerCase() : "";
-
-      if (userRole === "admin") {
-        navigate("/admin", { replace: true });
-
-      } else {
-        navigate("/stock", { replace: true });
-      }
 
     } catch (err) {
       console.error(err);
@@ -174,19 +157,19 @@ export default function Login() {
     }
   };
 
-  // Error highlighting logic
-  const isEmailError = error && (
-    error.toLowerCase().includes("user") || 
-    error.toLowerCase().includes("exist") ||
-    error.toLowerCase().includes("email")
-  );
-  
-  const isPasswordError = error && (
-    error.toLowerCase().includes("password")
-  );
+  const isEmailError = error && (error.toLowerCase().includes("user") || error.toLowerCase().includes("exist") || error.toLowerCase().includes("email"));
+  const isPasswordError = error && error.toLowerCase().includes("password");
 
   return (
     <div className="login-page-wrapper">
+      
+      {/* --- CSS FIX: Center Text in SweetAlert --- */}
+      <style>{`
+        div:where(.swal2-container) .swal2-html-container {
+          text-align: center !important;
+        }
+      `}</style>
+
       <div className="login-card-container">
         <div className="login-form-side">
           <div className="form-content">

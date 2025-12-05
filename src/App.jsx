@@ -1,10 +1,11 @@
+// src/App.jsx
 import { Routes, Route } from "react-router-dom";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import Stock from "./pages/Stock";
 import AdminUsers from "./pages/AdminUsers";
-import ProtectedRoute from "./components/ProtectedRoute.jsx";
+import ProtectedRoute from "./components/ProtectedRoute";
 
 export default function App() {
   return (
@@ -23,10 +24,11 @@ export default function App() {
           </ProtectedRoute>
         }
       />
+
       <Route
         path="/admin"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute adminOnly={true}>
             <AdminUsers />
           </ProtectedRoute>
         }

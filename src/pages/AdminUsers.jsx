@@ -7,6 +7,18 @@ import '../../css/AdminUsers.css';
 export default function AdminUsers() {
   const navigate = useNavigate();
 
+  // --- 0. AUTHENTICATION & PERMISSIONS CONTEXT ---
+  // FIX: Changed localStorage to sessionStorage to isolate tabs
+  const loggedInUser = JSON.parse(sessionStorage.getItem("loggedInUser") || "{}");
+  const loggedInUserId = loggedInUser.id;
+  
+  // Normalize role safely
+  const myRole = (loggedInUser.role || "").toLowerCase();
+  
+  // Define Permissions
+  const isSuperAdmin = myRole.includes("super");
+  const isAdmin = myRole.includes("admin") && !isSuperAdmin;
+
   // --- STATE MANAGEMENT ---
   const [activeView, setActiveView] = useState("users");
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth > 900);
@@ -22,10 +34,8 @@ export default function AdminUsers() {
   const [logs, setLogs] = useState([]); 
   const [isLoading, setIsLoading] = useState(true);
   const [isLogsLoading, setIsLogsLoading] = useState(false);
-
-  // Date Filter State for Logs
   const [logDateFilter, setLogDateFilter] = useState("");
-
+  
   // --- RESPONSIVE SIDEBAR ---
   useEffect(() => {
     const handleResize = () => setIsSidebarOpen(window.innerWidth > 900);
@@ -52,20 +62,14 @@ export default function AdminUsers() {
     }
   }, []);
 
-  // --- 2. FETCH LOGS (WITH DATE FILTER) ---
+  // --- 2. FETCH LOGS ---
   const fetchLogs = useCallback(async (isBackground = false) => {
     try {
-      // Only show loading spinner if NOT a background refresh
-      if (!isBackground) {
-        setIsLogsLoading(true);
-      }
-      
-      // Append date query if selected
+      if (!isBackground) setIsLogsLoading(true);
       let url = 'https://localhost:7262/api/audit';
       if (logDateFilter) {
         url += `?date=${logDateFilter}`;
       }
-
       const response = await fetch(url);
       if (!response.ok) throw new Error("Failed to fetch logs");
       const data = await response.json();
@@ -73,27 +77,22 @@ export default function AdminUsers() {
     } catch (error) {
       console.error("Error fetching logs:", error);
     } finally {
-      // Always turn off loading state to ensure UI is visible
       setIsLogsLoading(false);
     }
   }, [logDateFilter]); 
 
-  // --- 3. INITIAL LOAD & POLLING LOGIC ---
+  // --- 3. INITIAL LOAD & POLLING ---
   useEffect(() => {
-    // Initial Load
     if (activeView === 'users') {
       if (activeUserTab === 'list') fetchUsers(false);
       if (activeUserTab === 'activity') fetchLogs(false);
     }
-
-    // Polling Interval
     const intervalId = setInterval(() => {
       if (activeView === 'users') {
         if (activeUserTab === 'list') fetchUsers(true);
-        if (activeUserTab === 'activity') fetchLogs(true); // Pass true for silent update
+        if (activeUserTab === 'activity') fetchLogs(true);
       }
     }, 10000);
-
     return () => clearInterval(intervalId);
   }, [fetchUsers, fetchLogs, activeView, activeUserTab]);
 
@@ -105,7 +104,6 @@ export default function AdminUsers() {
     const admins = users.filter(u => u.role === "Admin").length;
     const managers = users.filter(u => u.role === "Manager").length;
     const others = total - admins - managers;
-
     return { total, active, pending, admins, managers, others };
   }, [users]);
 
@@ -119,8 +117,69 @@ export default function AdminUsers() {
     return `conic-gradient(var(--primary) 0% ${p1}%, #10b981 ${p1}% ${p2}%, #f59e0b ${p2}% 100%)`;
   }, [reportStats]);
 
+  // --- PERMISSION LOGIC ---
+
+  // 1. VISIBILITY: Who can see whom?
+  const visibleUsers = users.filter(user => {
+    if (user.id === loggedInUserId) return true; // Always see self
+    if (isSuperAdmin) return true; // Super Admin sees all
+
+    if (isAdmin) {
+      const tRole = (user.role || "").toLowerCase();
+      // Admin CANNOT see Super Admin (Security)
+      if (tRole.includes("super")) return false;
+      return true; 
+    }
+    return true; 
+  });
+
+  // 2. STATUS PERMISSION: Who can Enable/Disable/Approve?
+  const canManageStatus = (targetUser) => {
+    if (targetUser.id === loggedInUserId) return false; // Can't disable self
+
+    if (isSuperAdmin) return true; // Super Admin manages all status
+
+    if (isAdmin) {
+      const tRole = (targetUser.role || "").toLowerCase();
+      // Admin CANNOT manage status of other Admins or Super Admins
+      if (tRole.includes("admin") || tRole.includes("super")) {
+        return false;
+      }
+      // Admin CAN manage Manager/Viewer/User
+      return true;
+    }
+    return false;
+  };
+
+  // 3. ROLE CHANGE PERMISSION: Who can change roles?
+  const canChangeRole = (targetUser) => {
+    if (targetUser.id === loggedInUserId) return false;
+
+    // ONLY Super Admin can change roles
+    if (isSuperAdmin) return true;
+
+    // Admin CANNOT change roles (as per your request)
+    return false; 
+  };
+
+  // 4. DELETE PERMISSION
+  const canDeleteUser = (targetUser) => {
+    if (targetUser.id === loggedInUserId) return false;
+    // Only Super Admin can delete
+    if (isSuperAdmin) return true;
+    return false;
+  };
+
   // --- HANDLERS ---
   const handleRoleChange = async (id, newRole) => {
+    const targetUser = users.find(u => u.id === id);
+    
+    // Strict Permission Check
+    if (!canChangeRole(targetUser)) {
+        Swal.fire('Access Denied', 'Only System Admin can change roles.', 'error');
+        return;
+    }
+
     Swal.fire({
       title: 'Update Role?',
       text: `Change user role to ${newRole}?`,
@@ -144,6 +203,9 @@ export default function AdminUsers() {
   };
 
   const handleApproveUser = async (id) => {
+    const targetUser = users.find(u => u.id === id);
+    if (!canManageStatus(targetUser)) return;
+
     Swal.fire({
       title: 'Approve User?',
       text: "Activate account?",
@@ -157,6 +219,13 @@ export default function AdminUsers() {
   };
 
   const handleStatusToggle = async (id, currentStatus) => {
+    const targetUser = users.find(u => u.id === id);
+    
+    if (!canManageStatus(targetUser)) {
+        Swal.fire('Access Denied', 'You cannot change this user status.', 'error');
+        return;
+    }
+
     const newStatus = currentStatus === "Active" ? "Inactive" : "Active";
     updateUserStatus(id, newStatus);
   };
@@ -174,6 +243,13 @@ export default function AdminUsers() {
   };
 
   const handleDelete = async (id) => {
+    const targetUser = users.find(u => u.id === id);
+    
+    if (!canDeleteUser(targetUser)) {
+        Swal.fire('Access Denied', 'Only System Admin can delete users.', 'error');
+        return;
+    }
+
     Swal.fire({
       title: 'Delete User?', text: "Irreversible.", icon: 'warning', showCancelButton: true, confirmButtonColor: '#d33', confirmButtonText: 'Delete'
     }).then(async (result) => {
@@ -188,12 +264,13 @@ export default function AdminUsers() {
   };
 
   const handleLogout = () => {
-    Swal.fire({
-      title: 'Sign Out', icon: 'question',
-      showCancelButton: true, confirmButtonColor: '#4f46e5', confirmButtonText: 'Log Out'
-    }).then((result) => {
-      if (result.isConfirmed) navigate('/login');
-    });
+    // FIX: Changed localStorage to sessionStorage
+    sessionStorage.removeItem("loggedInUser");
+    if (window._statusCheckInterval) {
+      clearInterval(window._statusCheckInterval);
+      window._statusCheckInterval = null;
+    }
+    navigate("/login", { replace: true });
   };
 
   const handleDownloadExcel = () => {
@@ -221,17 +298,17 @@ export default function AdminUsers() {
   };
 
   const getLogColor = (action) => {
-    if (action.includes('Sale') || action.includes('Payment')) return '#10b981'; // Green
-    if (action.includes('Stock') || action.includes('Product')) return '#3b82f6'; // Blue
-    if (action.includes('Login')) return '#6366f1'; // Indigo
-    if (action.includes('Delete')) return '#ef4444'; // Red
-    if (action.includes('Role')) return '#8b5cf6'; // Purple
-    if (action.includes('Report')) return '#f59e0b'; // Orange
-    return '#64748b'; // Gray
+    if (action.includes('Sale') || action.includes('Payment')) return '#10b981';
+    if (action.includes('Stock') || action.includes('Product')) return '#3b82f6';
+    if (action.includes('Login')) return '#6366f1';
+    if (action.includes('Delete')) return '#ef4444';
+    if (action.includes('Role')) return '#8b5cf6';
+    if (action.includes('Report')) return '#f59e0b';
+    return '#64748b';
   };
 
-  // --- PAGINATION ---
-  const filteredUsers = users.filter(user => 
+  // --- PREPARE DATA FOR RENDER ---
+  const filteredUsers = visibleUsers.filter(user => 
     user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     user.email.toLowerCase().includes(searchTerm.toLowerCase())
   );
@@ -242,127 +319,47 @@ export default function AdminUsers() {
 
   return (
     <div className="dashboard-container">
-      {/* --- MODERN UI STYLES FOR ACTIVITY FEED --- */}
+      {/* --- INLINE STYLES FOR ACTIVITY FEED --- */}
       <style>{`
-        /* Header Controls */
-        .activity-header-controls {
-            display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px;
-        }
+        .activity-header-controls { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; }
         .activity-title { font-size: 1.5rem; color: #1e293b; margin: 0; font-weight: 700; letter-spacing: -0.5px; }
-        
-        /* Modern Date Input */
-        .date-filter-box {
-            display: flex; align-items: center; gap: 12px; 
-            background: #ffffff; padding: 8px 16px; 
-            border: 1px solid #e2e8f0; border-radius: 50px;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-            transition: all 0.2s ease;
-        }
+        .date-filter-box { display: flex; align-items: center; gap: 12px; background: #ffffff; padding: 8px 16px; border: 1px solid #e2e8f0; border-radius: 50px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); transition: all 0.2s ease; }
         .date-filter-box:focus-within { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1); }
         .date-filter-box span { font-size: 0.9rem; color: #64748b; font-weight: 600; }
         .date-filter-box input { border: none; outline: none; font-family: inherit; color: #334155; font-weight: 500; }
-        
-        /* Timeline Container */
         .activity-timeline { display: flex; flex-direction: column; gap: 0; padding-bottom: 20px; position: relative; }
-        
-        /* Timeline Item */
         .timeline-item { display: flex; gap: 20px; position: relative; padding-bottom: 35px; }
         .timeline-item:last-child { padding-bottom: 0; }
-        
-        /* Connecting Line */
-        .timeline-item::before { 
-          content: ''; position: absolute; left: 24px; top: 50px; bottom: 0; width: 2px; 
-          background: #e2e8f0; z-index: 0;
-        }
+        .timeline-item::before { content: ''; position: absolute; left: 24px; top: 50px; bottom: 0; width: 2px; background: #e2e8f0; z-index: 0; }
         .timeline-item:last-child::before { display: none; }
-        
-        /* Icon Bubble */
-        .timeline-icon-box {
-          width: 50px; height: 50px; border-radius: 50%; 
-          display: flex; align-items: center; justify-content: center;
-          font-size: 1.4rem; background: white; 
-          border: 3px solid #f8fafc; /* Outer ring */
-          box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
-          z-index: 2; flex-shrink: 0;
-        }
-        
-        /* Modern Card Content */
-        .timeline-content {
-          background: #ffffff; 
-          border-radius: 16px; 
-          padding: 20px; 
-          width: 100%;
-          border: 1px solid #f1f5f9;
-          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02), 0 2px 4px -1px rgba(0, 0, 0, 0.02);
-          transition: transform 0.2s ease, box-shadow 0.2s ease;
-          position: relative;
-          overflow: hidden;
-        }
-        
-        /* Hover Effect */
-        .timeline-content:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.025);
-          border-color: #e2e8f0;
-        }
-
-        /* Card Header */
+        .timeline-icon-box { width: 50px; height: 50px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.4rem; background: white; border: 3px solid #f8fafc; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); z-index: 2; flex-shrink: 0; }
+        .timeline-content { background: #ffffff; border-radius: 16px; padding: 20px; width: 100%; border: 1px solid #f1f5f9; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02), 0 2px 4px -1px rgba(0, 0, 0, 0.02); transition: transform 0.2s ease, box-shadow 0.2s ease; position: relative; overflow: hidden; }
+        .timeline-content:hover { transform: translateY(-2px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.025); border-color: #e2e8f0; }
         .t-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-        
         .t-user-info { display: flex; flex-direction: column; }
         .t-user { font-weight: 700; color: #0f172a; font-size: 1rem; }
         .t-role-label { font-size: 0.75rem; color: #64748b; font-weight: 500; }
-
-        .t-date { 
-            font-size: 0.8rem; color: #94a3b8; font-weight: 500; 
-            background: #f8fafc; padding: 4px 10px; border-radius: 20px;
-        }
-
-        /* Action Badge */
-        .t-action-badge { 
-          display: inline-block; font-size: 0.75rem; font-weight: 700; 
-          padding: 4px 10px; border-radius: 8px; text-transform: uppercase; letter-spacing: 0.5px;
-          margin-bottom: 8px;
-        }
-        
-        /* Details Text */
-        .t-details { 
-            font-size: 0.95rem; color: #475569; line-height: 1.6; 
-            background: #f8fafc; padding: 12px; border-radius: 8px; border-left: 0;
-        }
+        .t-date { font-size: 0.8rem; color: #94a3b8; font-weight: 500; background: #f8fafc; padding: 4px 10px; border-radius: 20px; }
+        .t-action-badge { display: inline-block; font-size: 0.75rem; font-weight: 700; padding: 4px 10px; border-radius: 8px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+        .t-details { font-size: 0.95rem; color: #475569; line-height: 1.6; background: #f8fafc; padding: 12px; border-radius: 8px; border-left: 0; }
       `}</style>
 
       {/* HEADER */}
       <header className="top-header">
         <div className="header-left">
-          {/* HAMBURGER TOGGLE FIX */}
-          <button 
-            className="hamburger-btn" 
-            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            aria-label="Toggle Sidebar"
-          >
+          <button className="hamburger-btn" onClick={() => setIsSidebarOpen(!isSidebarOpen)}>
             {isSidebarOpen ? (
-              // X Icon (Close)
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="18" y1="6" x2="6" y2="18"></line>
-                <line x1="6" y1="6" x2="18" y2="18"></line>
-              </svg>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
             ) : (
-              // Menu Icon (Open)
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="3" y1="12" x2="21" y2="12" />
-                <line x1="3" y1="6" x2="21" y2="6" />
-                <line x1="3" y1="18" x2="21" y2="18" />
-              </svg>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="18" x2="21" y2="18" /></svg>
             )}
           </button>
-          
           <div className="brand-logo"><span className="logo-icon">📦</span><span className="logo-text">StockMaster</span></div>
         </div>
         <div className="header-right">
           <div className="admin-profile">
-            <div className="text-info"><span className="name">Admin User</span><span className="role">Super Admin</span></div>
-            <div className="avatar">AD</div>
+            <div className="text-info"><span className="name">{loggedInUser.name || "User"}</span><span className="role">{loggedInUser.role || "Admin"}</span></div>
+            <div className="avatar">{loggedInUser.name ? loggedInUser.name.charAt(0) : "U"}</div>
           </div>
           <button className="header-logout-btn" onClick={handleLogout} title="Logout">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
@@ -418,17 +415,41 @@ export default function AdminUsers() {
                             {isLoading ? (
                               <tr><td colSpan="5" className="text-center" style={{padding: '20px'}}>Loading users...</td></tr>
                             ) : currentUsers.length > 0 ? (
-                              currentUsers.map(user => (
-                                <tr key={user.id}>
+                              currentUsers.map(user => {
+                                const canEditStatus = canManageStatus(user);
+                                const canChangeUserRole = canChangeRole(user);
+                                const canDel = canDeleteUser(user);
+
+                                // If I can't edit status AND can't change role AND can't delete, the row is read-only
+                                const isRowReadOnly = !canEditStatus && !canChangeUserRole && !canDel;
+
+                                return (
+                                <tr key={user.id} className={isRowReadOnly ? "row-disabled-actions" : ""}>
                                   <td className="text-left">
                                     <div className="user-info-cell">
                                       <div className="user-avatar">{user.name.charAt(0)}</div>
-                                      <div><div className="user-name">{user.name}</div><div className="user-email">{user.email}</div></div>
+                                      <div>
+                                        <div className="user-name">
+                                            {user.name} 
+                                            {user.id === loggedInUserId && <span style={{fontSize:'0.7rem', color:'#6366f1', marginLeft:'6px'}}>(You)</span>}
+                                        </div>
+                                        <div className="user-email">{user.email}</div>
+                                      </div>
                                     </div>
                                   </td>
                                   <td className="text-center">
                                     <div className="stylish-select-wrapper">
-                                      <select className={`stylish-select ${user.role.toLowerCase()}`} value={user.role} onChange={(e) => handleRoleChange(user.id, e.target.value)}>
+                                      <select 
+                                        className={`stylish-select ${user.role.toLowerCase()}`} 
+                                        value={user.role} 
+                                        onChange={(e) => canChangeUserRole && handleRoleChange(user.id, e.target.value)}
+                                        disabled={!canChangeUserRole}
+                                        style={{opacity: canChangeUserRole ? 1 : 0.6, cursor: canChangeUserRole ? 'pointer' : 'not-allowed'}}
+                                      >
+                                        {/* OPTION LOGIC: 
+                                            1. NO "Super Admin" option (Even Super Admin cannot assign Super Admin)
+                                            2. Regular Admin sees options but Select is Disabled above anyway. 
+                                        */}
                                         <option value="Admin">Admin</option>
                                         <option value="Manager">Manager</option>
                                         <option value="Viewer">Viewer</option>
@@ -440,19 +461,35 @@ export default function AdminUsers() {
                                     {user.status === "Pending" ? (
                                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}>
                                         <span style={{ backgroundColor: '#fef3c7', color: '#d97706', padding: '4px 8px', borderRadius: '12px', fontSize: '12px', fontWeight: 'bold' }}>Pending</span>
-                                        <button onClick={() => handleApproveUser(user.id)} style={{ background: '#10b981', color: 'white', border: 'none', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer', fontSize: '12px' }}>✓ Approve</button>
+                                        {canEditStatus && (
+                                            <button onClick={() => handleApproveUser(user.id)} style={{ background: '#10b981', color: 'white', border: 'none', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer', fontSize: '12px' }}>✓ Approve</button>
+                                        )}
                                       </div>
                                     ) : (
-                                      <label className="switch-toggle" title={user.status === "Active" ? "Deactivate" : "Activate"}>
-                                        <input type="checkbox" checked={user.status === "Active"} onChange={() => handleStatusToggle(user.id, user.status)} />
-                                        <span className="slider round"></span>
+                                      <label className="switch-toggle" title={!canEditStatus ? "Permission Denied" : (user.status === "Active" ? "Deactivate" : "Activate")}>
+                                        <input 
+                                            type="checkbox" 
+                                            checked={user.status === "Active"} 
+                                            onChange={() => canEditStatus && handleStatusToggle(user.id, user.status)}
+                                            disabled={!canEditStatus}
+                                        />
+                                        <span className={`slider round ${!canEditStatus ? "disabled" : ""}`}></span>
                                       </label>
                                     )}
                                   </td>
                                   <td className="text-left text-muted">{user.lastLogin}</td>
-                                  <td className="text-right"><button className="icon-btn delete" onClick={() => handleDelete(user.id)}>🗑️</button></td>
+                                  <td className="text-right">
+                                    <button 
+                                        className="icon-btn delete" 
+                                        onClick={() => canDel && handleDelete(user.id)}
+                                        disabled={!canDel}
+                                        style={{opacity: canDel ? 1 : 0.3, cursor: canDel ? 'pointer' : 'not-allowed'}}
+                                    >
+                                        🗑️
+                                    </button>
+                                  </td>
                                 </tr>
-                              ))
+                              )})
                             ) : (<tr><td colSpan="5" className="no-data">No users found.</td></tr>)}
                           </tbody>
                         </table>
@@ -469,27 +506,16 @@ export default function AdminUsers() {
                     </div>
                   )}
 
-                  {/* TAB 2: SYSTEM ACTIVITY (MODERNIZED UI) */}
+                  {/* TAB 2: SYSTEM ACTIVITY */}
                   {activeUserTab === "activity" && (
                     <div className="activity-section fade-in">
-                      
-                      {/* HEADER */}
                       <div className="activity-header-controls">
                          <h3 className="activity-title">System Activity Log</h3>
                          <div className="date-filter-box">
                             <span>📅 Date:</span>
-                            <input 
-                              type="date" 
-                              value={logDateFilter} 
-                              onChange={(e) => setLogDateFilter(e.target.value)} 
-                            />
+                            <input type="date" value={logDateFilter} onChange={(e) => setLogDateFilter(e.target.value)} />
                             {logDateFilter && (
-                                <button 
-                                    onClick={() => setLogDateFilter("")} 
-                                    style={{border:'none', background:'none', color:'#ef4444', cursor:'pointer', fontSize:'0.8rem', fontWeight:'bold'}}
-                                >
-                                    ✕ Clear
-                                </button>
+                                <button onClick={() => setLogDateFilter("")} style={{border:'none', background:'none', color:'#ef4444', cursor:'pointer', fontSize:'0.8rem', fontWeight:'bold'}}>✕ Clear</button>
                             )}
                          </div>
                       </div>
@@ -509,32 +535,17 @@ export default function AdminUsers() {
                                 <div className="timeline-icon-box" style={{color: accentColor, borderColor: accentColor}}>
                                   {getLogIcon(log.action)}
                                 </div>
-                                
-                                {/* Modern Card with Color Accent Border */}
                                 <div className="timeline-content" style={{borderLeft: `4px solid ${accentColor}`}}>
-                                  
                                   <div className="t-header">
                                     <div className="t-user-info">
                                       <span className="t-user">{log.userName || "System"}</span>
                                       <span className="t-role-label">Action Performer</span>
                                     </div>
                                     <span className="t-date">
-                                      {new Date(log.timestamp).toLocaleString(undefined, { 
-                                        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' 
-                                      })}
+                                      {new Date(log.timestamp).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                                     </span>
                                   </div>
-
-                                  <span 
-                                    className="t-action-badge" 
-                                    style={{
-                                      backgroundColor: `${accentColor}15`, // 15% opacity
-                                      color: accentColor
-                                    }}
-                                  >
-                                    {log.action}
-                                  </span>
-
+                                  <span className="t-action-badge" style={{ backgroundColor: `${accentColor}15`, color: accentColor }}>{log.action}</span>
                                   <div className="t-details">{log.details}</div>
                                 </div>
                               </div>

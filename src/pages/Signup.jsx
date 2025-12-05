@@ -12,6 +12,10 @@ export default function Signup() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [agreeTerms, setAgreeTerms] = useState(false);
 
+  // Password Visibility States
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
   // UI states
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -146,28 +150,76 @@ export default function Signup() {
               {/* Password */}
               <div className="input-group compact">
                 <label>Password</label>
-                <div className={`input-wrapper ${isPassError ? 'error' : ''}`}>
+                <div 
+                  className={`input-wrapper ${isPassError ? 'error' : ''}`} 
+                  style={{ position: 'relative' }} // Added relative positioning
+                >
                   <span className="icon">🔒</span>
                   <input
-                    type="password"
+                    type={showPassword ? "text" : "password"}
                     placeholder="Create a password"
                     value={password}
+                    style={{ paddingRight: '40px' }} // Space for the eye icon
                     onChange={(e) => { setPassword(e.target.value); if (error) setError(""); }}
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    style={{
+                      position: 'absolute',
+                      right: '10px',
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      fontSize: '1.2rem',
+                      color: '#888',
+                      padding: 0,
+                      display: 'flex',
+                      alignItems: 'center'
+                    }}
+                  >
+                    {showPassword ? '👁️' : '👁️‍🗨️'}
+                  </button>
                 </div>
               </div>
 
               {/* Confirm Password */}
               <div className="input-group compact">
                 <label>Confirm Password</label>
-                <div className={`input-wrapper ${isPassError ? 'error' : ''}`}>
+                <div 
+                  className={`input-wrapper ${isPassError ? 'error' : ''}`}
+                  style={{ position: 'relative' }} // Added relative positioning
+                >
                   <span className="icon">🔑</span>
                   <input
-                    type="password"
+                    type={showConfirmPassword ? "text" : "password"}
                     placeholder="Repeat password"
                     value={confirmPassword}
+                    style={{ paddingRight: '40px' }} // Space for the eye icon
                     onChange={(e) => { setConfirmPassword(e.target.value); if (error) setError(""); }}
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    style={{
+                      position: 'absolute',
+                      right: '10px',
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      fontSize: '1.2rem',
+                      color: '#888',
+                      padding: 0,
+                      display: 'flex',
+                      alignItems: 'center'
+                    }}
+                  >
+                    {showConfirmPassword ? '👁️' : '👁️‍🗨️'}
+                  </button>
                 </div>
               </div>
 

@@ -246,7 +246,7 @@ export default function Signup() {
           </div>
         </div>
 
-        {/* RIGHT SIDE: IMAGE */}
+        {/* RIGHT SIDE: IMAGEs */}
         <div className="signup-image-side">
           <div className="image-overlay">
             <div className="overlay-text">
